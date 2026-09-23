@@ -4,7 +4,7 @@ const BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
 ).replace(/\/+$/, "");
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
+// const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 export const API_BASE_URL = BASE_URL;
 
 /** localStorage keys for the client-side session. */
