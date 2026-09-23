@@ -77,7 +77,7 @@ function SuspenseWrapper({ children }) {
 
 function LegacyInitiateMatrixRedirect() {
   const search = typeof window !== "undefined" ? window.location.search : "";
-  return <Navigate to={`/new-shared-claim${search}`} replace />;
+  return <Navigate to={`new-shared-claim${search}`} replace />;
 }
 
 function page(Component) {
@@ -88,72 +88,79 @@ function page(Component) {
   );
 }
 
-export const router = createBrowserRouter([
+const routerBaseName = import.meta.env.PROD ? "/ctkmatrix" : "/";
+
+export const router = createBrowserRouter(
+  [
+    {
+      path: "/",
+      element: <Navigate to="signin" replace />,
+    },
+    {
+      element: <PublicLayout />,
+      children: [
+        { path: "signin", element: page(SignIn) },
+        { path: "accept-invite", element: page(AcceptInvitation) },
+        { path: "password-reset", element: page(PasswordReset) },
+        { path: "access-expired", element: page(AccessExpired) },
+        { path: "unauthorized", element: page(Unauthorized) },
+        { path: "request-access", element: page(RequestAccess) },
+      ],
+    },
+    {
+      element: <AuthLayout />,
+      children: [
+        { path: "dashboard", element: page(Dashboard) },
+        { path: "claims", element: page(Claims) },
+        { path: "claims/:claimId", element: page(ClaimDetail) },
+        { path: "claims/:claimId/respond", element: page(ClaimRespond) },
+        { path: "claims/:claimId/settlement", element: page(ClaimSettlement) },
+        { path: "claims/:claimId/close", element: page(ClaimClose) },
+        { path: "new-shared-claim", element: page(NewSharedClaim) },
+        { path: "claim-management", element: page(ClaimManagement) },
+        { path: "claim-management/:caseId", element: page(ClaimManagementDetail) },
+        { path: "claim-packages", element: page(ClaimPackages) },
+        { path: "documents", element: page(Documents) },
+        { path: "documents/upload", element: page(DocumentUpload) },
+        { path: "documents/:documentId", element: page(DocumentDetail) },
+        { path: "approvals", element: page(Approvals) },
+        { path: "audit", element: page(Audit) },
+        { path: "notifications", element: page(Notifications) },
+        { path: "settings", element: page(Settings) },
+        { path: "settings/notifications", element: page(SettingsNotifications) },
+        { path: "settings/workspace", element: page(SettingsWorkspace) },
+        { path: "settings/security", element: page(SettingsSecurity) },
+        { path: "admin/company-enablement", element: page(AdminCompanyEnablement) },
+        { path: "admin/users", element: page(AdminUsers) },
+        { path: "admin/users/new", element: page(AdminUserNew) },
+        { path: "admin/users/sync", element: page(AdminUserSync) },
+        { path: "companies", element: page(Companies) },
+        { path: "companies/onboarding", element: page(CompanyOnboarding) },
+        { path: "invitations", element: page(Invitations) },
+        { path: "invitations/:inviteId", element: page(InvitationDetail) },
+        { path: "external-dashboard", element: page(ExternalDashboard) },
+        { path: "demo", element: page(Demo) },
+        { path: "prototype-states", element: page(PrototypeStates) },
+        { path: "auto-matrix-entry", element: page(AutoMatrixEntry) },
+        { path: "compliance-matrix-entry", element: page(ComplianceMatrixEntry) },
+        { path: "audit-matrix-entry", element: page(AuditMatrixEntry) },
+        { path: "initiate-matrix", element: <LegacyInitiateMatrixRedirect /> },
+        { path: "admin/access-requests", element: page(AdminAccessRequests) },
+      ],
+    },
+    {
+      element: <ProductLayout />,
+      children: [
+        { path: "product/auto", element: page(AutoProductDashboard) },
+        { path: "product/compliance", element: page(ComplianceProductDashboard) },
+      ],
+    },
+    {
+      path: "*",
+      element: page(NotFound),
+    },
+  ],
   {
-    path: "/",
-    element: <Navigate to="/signin" replace />,
-  },
-  {
-    element: <PublicLayout />,
-    children: [
-      { path: "signin", element: page(SignIn) },
-      { path: "accept-invite", element: page(AcceptInvitation) },
-      { path: "password-reset", element: page(PasswordReset) },
-      { path: "access-expired", element: page(AccessExpired) },
-      { path: "unauthorized", element: page(Unauthorized) },
-      { path: "request-access", element: page(RequestAccess) },
-    ],
-  },
-  {
-    element: <AuthLayout />,
-    children: [
-      { path: "dashboard", element: page(Dashboard) },
-      { path: "claims", element: page(Claims) },
-      { path: "claims/:claimId", element: page(ClaimDetail) },
-      { path: "claims/:claimId/respond", element: page(ClaimRespond) },
-      { path: "claims/:claimId/settlement", element: page(ClaimSettlement) },
-      { path: "claims/:claimId/close", element: page(ClaimClose) },
-      { path: "new-shared-claim", element: page(NewSharedClaim) },
-      { path: "claim-management", element: page(ClaimManagement) },
-      { path: "claim-management/:caseId", element: page(ClaimManagementDetail) },
-      { path: "claim-packages", element: page(ClaimPackages) },
-      { path: "documents", element: page(Documents) },
-      { path: "documents/upload", element: page(DocumentUpload) },
-      { path: "documents/:documentId", element: page(DocumentDetail) },
-      { path: "approvals", element: page(Approvals) },
-      { path: "audit", element: page(Audit) },
-      { path: "notifications", element: page(Notifications) },
-      { path: "settings", element: page(Settings) },
-      { path: "settings/notifications", element: page(SettingsNotifications) },
-      { path: "settings/workspace", element: page(SettingsWorkspace) },
-      { path: "settings/security", element: page(SettingsSecurity) },
-      { path: "admin/company-enablement", element: page(AdminCompanyEnablement) },
-      { path: "admin/users", element: page(AdminUsers) },
-      { path: "admin/users/new", element: page(AdminUserNew) },
-      { path: "admin/users/sync", element: page(AdminUserSync) },
-      { path: "companies", element: page(Companies) },
-      { path: "companies/onboarding", element: page(CompanyOnboarding) },
-      { path: "invitations", element: page(Invitations) },
-      { path: "invitations/:inviteId", element: page(InvitationDetail) },
-      { path: "external-dashboard", element: page(ExternalDashboard) },
-      { path: "demo", element: page(Demo) },
-      { path: "prototype-states", element: page(PrototypeStates) },
-      { path: "auto-matrix-entry", element: page(AutoMatrixEntry) },
-      { path: "compliance-matrix-entry", element: page(ComplianceMatrixEntry) },
-      { path: "audit-matrix-entry", element: page(AuditMatrixEntry) },
-      { path: "initiate-matrix", element: <LegacyInitiateMatrixRedirect /> },
-      { path: "admin/access-requests", element: page(AdminAccessRequests) },
-    ],
-  },
-  {
-    element: <ProductLayout />,
-    children: [
-      { path: "product/auto", element: page(AutoProductDashboard) },
-      { path: "product/compliance", element: page(ComplianceProductDashboard) },
-    ],
-  },
-  {
-    path: "*",
-    element: page(NotFound),
-  },
-]);
+    basename: routerBaseName,
+  }
+);
