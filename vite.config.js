@@ -4,6 +4,8 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 export default defineConfig({
+  // GitHub Pages hosts this project at /ctkmatrix/, not at the domain root.
+  base: "/ctkmatrix/",
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
