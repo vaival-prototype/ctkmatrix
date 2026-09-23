@@ -1,0 +1,1 @@
+import{c as e,o as t,s as n}from"./api-BruByHpt.js";function r(){return t(`/notifications`)}function i(){return n(`/notifications/mark-all-read`)}function a(){return t(`/notification-preferences`)}function o(t){return e(`/notification-preferences`,t)}export{o as i,r as n,i as r,a as t};

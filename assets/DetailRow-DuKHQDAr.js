@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-bzQ4Vb5N.js";var t=e();function n({label:e,value:n}){return(0,t.jsxs)(`div`,{className:`flex justify-between gap-4 border-b py-2 text-sm last:border-0`,children:[(0,t.jsx)(`span`,{className:`text-muted-foreground`,children:e}),(0,t.jsx)(`span`,{className:`text-right font-medium`,children:n})]})}export{n as t};

@@ -1,0 +1,1 @@
+import{o as e,s as t}from"./api-BruByHpt.js";function n(){return e(`/companies`)}function r(t){return e(`/companies/${t}`)}function i(e){return t(`/companies/onboarding`,e)}export{r as n,i as r,n as t};

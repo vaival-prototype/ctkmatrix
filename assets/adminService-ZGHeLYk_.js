@@ -1,0 +1,1 @@
+import{c as e,o as t}from"./api-BruByHpt.js";function n(){return t(`/admin/rbac`)}function r(t){return e(`/admin/rbac`,t)}function i(){return t(`/admin/system-boundaries`)}function a(){return t(`/admin/collaboration-modes`)}export{r as i,n,i as r,a as t};
