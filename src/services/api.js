@@ -1,3 +1,9 @@
+const DEFAULT_API_BASE_URL = "http://216.24.136.56:9050/api";
+
+const BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
+).replace(/\/+$/, "");
+
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 export const API_BASE_URL = BASE_URL;
 
