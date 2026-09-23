@@ -1,4 +1,4 @@
-name: Deploy CTK Claim Matrix to GitHub Pages
+name: Deploy CTK Claim Matrix to GitHub Pages (gh-pages branch)
 
 on:
   push:
@@ -11,21 +11,17 @@ on:
         default: true
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write # needed to push the built site to the gh-pages branch
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     env:
-      # Manual run -> use the checkbox. Push -> repo variable VITE_USE_MOCK (defaults to "true").
       VITE_USE_MOCK: ${{ github.event_name == 'workflow_dispatch' && inputs.use_mock && 'true' || github.event_name == 'workflow_dispatch' && 'false' || vars.VITE_USE_MOCK || 'true' }}
-      # Must be HTTPS in production, otherwise browsers block it (mixed content) on github.io.
       VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || 'http://216.24.136.56:9050/api' }}
 
     steps:
@@ -35,37 +31,31 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22 # Vite 8 needs Node 20.19+ / 22.12+
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
       - name: Build
-        run: |
-          echo "Mock mode: $VITE_USE_MOCK | API: $VITE_API_BASE_URL"
-          npm run build
+        run: npm run build
 
-      - name: SPA fallback (deep links + refresh)
+      - name: SPA fallback + disable Jekyll
         run: |
           cp dist/index.html dist/404.html
           touch dist/.nojekyll
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+      - name: Sanity check (fail if raw source slipped in)
+        run: |
+          if grep -q 'src/main.jsx' dist/index.html; then
+            echo "::error::dist/index.html still references src/main.jsx"; exit 1
+          fi
+          grep -o 'src="[^"]*assets/[^"]*"' dist/index.html
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Publish dist/ to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: ./dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages
+          force_orphan: true
