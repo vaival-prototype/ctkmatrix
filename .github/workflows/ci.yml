@@ -2,7 +2,7 @@ name: Deploy CTK Claim Matrix to GitHub Pages (gh-pages branch)
 
 on:
   push:
-    branches: [main]
+    branches: [khizooo-dev]
   workflow_dispatch:
     inputs:
       use_mock:
