@@ -1,18 +1,24 @@
 import { useState, useEffect } from "react";
-import { getClaimPackages } from "@/services/claimService";
-import { pickList } from "@/services/api";
+import { lookupInvitation } from "@/services/authService";
+import { pickData } from "@/services/api";
 
-export function useClaimPackages(refreshKey = 0) {
+/** Preview of an invitation from its emailed code (null code = nothing to look up). */
+export function useInvitationLookup(code) {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!!code);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!code) {
+      setLoading(false);
+      return undefined;
+    }
     const controller = new AbortController();
     setLoading(true);
-    getClaimPackages()
+    setError(null);
+    lookupInvitation(code)
       .then((res) => {
-        if (!controller.signal.aborted) setData(pickList(res).items);
+        if (!controller.signal.aborted) setData(pickData(res));
       })
       .catch((err) => {
         if (!controller.signal.aborted) setError(err);
@@ -21,7 +27,7 @@ export function useClaimPackages(refreshKey = 0) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [refreshKey]);
+  }, [code]);
 
   return { data, loading, error };
 }

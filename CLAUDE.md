@@ -14,7 +14,7 @@ npm run format     # Prettier --write across the repo
 
 There is no test runner configured — no `test` script, no test framework in `package.json`. Do not assume tests can be run.
 
-Requires a `.env` with `VITE_API_BASE_URL` (see `.env.example`, e.g. `http://localhost:3001/api`). If unset, the API base defaults to `/api`.
+Env vars: `VITE_USE_MOCK="true"` serves every request from the in-browser mock backend (this is what the GitHub Pages demo runs — see `.github/workflows/ci.yml`). Without it, requests go to `VITE_API_BASE_URL`, defaulting to `http://216.24.136.56:9050/api` (`src/services/api.js`). Local demo: `VITE_USE_MOCK=true npm run dev`.
 
 ## Stack
 
@@ -36,7 +36,10 @@ Data flows through three layers, kept strictly separate:
 - All requests send `credentials: "include"`.
 
 ### Auth model
-Session is a **httpOnly cookie** set by the backend on `/auth/login` and `/auth/accept-invitation` — there is **no token in JS** to read or attach. `AuthContext` (`src/context/AuthContext.jsx`) hydrates the session on load via `authService.getCurrentUser()`; a `401` there simply means "logged out" and is swallowed intentionally. Consume auth with the `useAuth()` hook. `AuthLayout` (`src/layouts/AuthLayout.jsx`) is the route guard: it shows a spinner while `loading`, then redirects to `/signin` if unauthenticated.
+Bearer token: `/auth/login`, `/auth/sso`, `/auth/accept-invitation` and `/auth/set-password` return `{ user, token }`. `AuthContext` stores both in localStorage (`cm_auth_token`, `cm_auth_user`) and `api.js` attaches `Authorization: Bearer <token>`. Consume auth with `useAuth()`. `AuthLayout` redirects to `/signin` when signed out.
+
+### Access model
+Six account types, keyed by `user.tier`: `admin`, `approver`, `level3` (CTK Auto), `level2` (CTK Compliance), `level1` (not a CTK customer), `level4` (person in the claim). Capabilities per tier come from `GET /access-tiers` (`accessTiers` in `src/data/mock.js`) via `useAccessTier()`, which **fails closed** (no capabilities while loading or for an unknown tier). Pages are locked with `page(Component, capability)` in the router (`AccessGuard`); the mock backend enforces the same rules. Claim access is per person (`claim.members`); Admin and Approver see every claim, Approver read-only.
 
 ### Routing
 All routes live in `src/routes/router.jsx` (`createBrowserRouter`, all pages lazy-loaded). Two layout branches: `PublicLayout` for unauthenticated pages (signin, accept-invite, password-reset, etc.) and `AuthLayout` (which wraps everything in `AppShell`) for authenticated pages. `main.jsx` mounts `AuthProvider` → `RouterProvider` → global `sonner` `Toaster`.
@@ -47,6 +50,5 @@ All routes live in `src/routes/router.jsx` (`createBrowserRouter`, all pages laz
 - **Prettier** enforces: double quotes, semicolons, 2-space indent, 100-col width, ES5 trailing commas.
 - New UI should compose the existing `src/components/ui/` primitives and `src/utils/cn.js` (clsx + tailwind-merge) rather than hand-rolling styled elements.
 
-## Mock data caveat
-
-`src/data/mock.js` is legacy — services **no longer import it** (they all hit the real API). It is still consumed by a few demo/prototype surfaces only: `Header.jsx`, `pages/Demo.jsx`, `pages/PrototypeStates.jsx`, `pages/ExternalDashboard.jsx`. It also documents the entity shapes that `APIrequire.md` is derived from. Note: the `README.md` still describes the old "services return mock data" flow — that is outdated; treat `APIrequire.md` and the actual service files as authoritative.
+## Mock backend
+`src/services/mockResolver.js` is a small route table acting as the backend in mock mode; `src/services/mockDb.js` keeps its data (seeded from `src/data/mock.js`) in localStorage so the demo survives reloads and works across tabs. "Reset demo data" (sign-in page or account menu) restores the seed. The prototype never sends email: invites and set-password links land in the Demo inbox (`/demo-inbox`). L2/L3 users reach Matrix by simulated single sign-on from the fake Auto/Compliance app screens (`/product/auto`, `/product/compliance`). `README.md` and `APIrequire.md` predate this and are partly out of date.

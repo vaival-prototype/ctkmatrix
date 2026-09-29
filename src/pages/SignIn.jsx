@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ShieldCheck, Users, FileSearch, GitBranch } from "lucide-react";
+import { ShieldCheck, Users, FileSearch, GitBranch, Mail, RotateCcw, LogIn } from "lucide-react";
+import { toast } from "sonner";
+import ResetDemoDialog from "@/components/shared/ResetDemoDialog";
 import { useAuth } from "@/context/AuthContext";
 import { ApiError } from "@/services/api";
 import { demoAccounts } from "@/data/mock";
@@ -36,7 +38,23 @@ function validatePassword(password) {
 export default function SignIn() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useAuth();
+  const { login, ssoLogin } = useAuth();
+  const [resetOpen, setResetOpen] = useState(false);
+  const [ssoEmail, setSsoEmail] = useState(null);
+
+  // Simulates already being signed in to the Claim Toolkit Auto / Compliance
+  // app: Matrix opens without its own sign-in, starting on that app's screen.
+  async function openFromClaimToolkit(account) {
+    setSsoEmail(account.email);
+    try {
+      await ssoLogin(account.email);
+      navigate(account.app === "Auto" ? "/product/auto" : "/product/compliance", { replace: true });
+    } catch (err) {
+      toast.error(err.message || "Couldn't open Claim Matrix");
+    } finally {
+      setSsoEmail(null);
+    }
+  }
 
   const email = useFormField("");
   const password = useFormField("");
@@ -124,14 +142,17 @@ export default function SignIn() {
 
       {/* Right form */}
       <div className="flex items-center justify-center p-6 sm:p-12">
-        <div className="w-full max-w-sm">
+        <div className="w-full max-w-lg">
           <Link to="/dashboard" className="lg:hidden mb-8 flex items-center gap-2">
             <div className="h-10 w-10 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-bold">CM</div>
             <div className="font-semibold">Claim Matrix</div>
           </Link>
 
           <h2 className="text-2xl font-semibold tracking-tight">Sign in to your workspace</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Use your Claim Toolkit credentials to access shared claim matrixs.</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            For Claim Matrix accounts. Claim Toolkit Auto and Compliance users open Matrix from their own app and are
+            signed in automatically.
+          </p>
 
           <form className="mt-8 space-y-4" onSubmit={handleSignIn} noValidate>
             <div className="space-y-1.5">
@@ -171,25 +192,70 @@ export default function SignIn() {
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">{formError}</p>
             )}
             <Button type="submit" className="w-full" size="lg" disabled={submitting}>
-              {submitting ? "Signing in…" : "Sign in"}
+              <LogIn className="h-4 w-4" /> {submitting ? "Signing in…" : "Sign in"}
             </Button>
           </form>
 
-          <div className="mt-6 rounded-md border bg-muted/30 p-4">
-            <div className="text-xs font-semibold text-foreground">Demo accounts (prototype only)</div>
-            <div className="mt-2 grid grid-cols-1 gap-1.5">
-              {demoAccounts.map((acct) => (
-                <button
-                  key={acct.email}
-                  type="button"
-                  className="rounded-sm border bg-background px-2.5 py-1.5 text-left text-xs text-muted-foreground hover:border-accent hover:text-foreground"
-                  onClick={() => { email.setValue(acct.email); password.setValue("demo1234"); }}
-                >
-                  {acct.label}
-                </button>
-              ))}
+          <div className="mt-6 space-y-4 rounded-md border bg-muted/30 p-4">
+            <div>
+              <div className="text-xs font-semibold text-foreground">Demo — open from Claim Toolkit</div>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">Already signed in to the Auto or Compliance app.</p>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {demoAccounts
+                  .filter((acct) => acct.kind === "sso")
+                  .map((acct) => (
+                    <button
+                      key={acct.email}
+                      type="button"
+                      disabled={ssoEmail !== null}
+                      className="flex flex-col items-start gap-0.5 rounded-sm border bg-background px-3 py-2 text-left text-xs hover:border-accent disabled:opacity-60"
+                      onClick={() => openFromClaimToolkit(acct)}
+                    >
+                      <span className="font-medium text-foreground">
+                        {ssoEmail === acct.email ? "Opening…" : acct.label}
+                      </span>
+                      <span className="text-muted-foreground">{acct.detail}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-foreground">Demo — Matrix accounts</div>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">Fills the form above. Demo password: demo1234</p>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {demoAccounts
+                  .filter((acct) => acct.kind === "password")
+                  .map((acct) => (
+                    <button
+                      key={acct.email}
+                      type="button"
+                      className="flex flex-col items-start gap-0.5 rounded-sm border bg-background px-3 py-2 text-left text-xs hover:border-accent"
+                      onClick={() => {
+                        email.setValue(acct.email);
+                        email.setError("");
+                        password.setValue("demo1234");
+                        password.setError("");
+                        setFormError("");
+                      }}
+                    >
+                      <span className="font-medium text-foreground">{acct.label}</span>
+                      <span className="text-muted-foreground">{acct.detail}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 border-t pt-3">
+              <Button asChild variant="outline" size="sm">
+                <Link to="/demo-inbox">
+                  <Mail className="h-4 w-4" /> Demo inbox
+                </Link>
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setResetOpen(true)}>
+                <RotateCcw className="h-4 w-4" /> Reset demo data
+              </Button>
             </div>
           </div>
+          <ResetDemoDialog open={resetOpen} onOpenChange={setResetOpen} />
 
           <p className="mt-6 text-xs text-center text-muted-foreground">
             No invitation? <Link to="/request-access" className="text-accent hover:underline">Request access</Link>

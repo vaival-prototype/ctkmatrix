@@ -46,7 +46,7 @@ export default function AdminAccessRequests() {
   async function act(id, decision, label) {
     setActingId(id);
     try {
-      await decideAccessRequest(id, decision);
+      await decideAccessRequest(id, { decision });
       toast.success(label);
       setRefreshKey((k) => k + 1);
       setDetailsRow(null);

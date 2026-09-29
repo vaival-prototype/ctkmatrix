@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import PageHeader from "@/components/shared/PageHeader";
 import StatusBadge from "@/components/shared/StatusBadge";
@@ -14,17 +14,25 @@ const LIMIT = 25;
 
 export default function Audit() {
   const [page, setPage] = useState(1);
-  const { data, meta, loading, error } = useAuditEvents({ page, limit: LIMIT });
+  const [query, setQuery] = useState("");
+  const { data, meta, loading, error } = useAuditEvents(null, { page, limit: LIMIT });
 
-  const events = data ?? [];
-  const total = meta?.total ?? events.length;
+  const events = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const items = data ?? [];
+    if (!q) return items;
+    return items.filter((e) =>
+      [e.actor, e.actorCompany, e.action, e.target, e.matrixCode].some((v) => String(v ?? "").toLowerCase().includes(q))
+    );
+  }, [data, query]);
+  const total = meta?.total ?? (data ?? []).length;
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
   return (
     <>
       <PageHeader
         title="Audit Trail"
-        subtitle="Immutable, tamper-evident log of all collaboration events"
+        subtitle="Every action on every claim — visible to the Admin and Approvers only"
         actions={
           <>
             <Button variant="outline" size="sm" disabled title="CSV export isn't available yet">
@@ -40,12 +48,13 @@ export default function Audit() {
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 min-w-[260px] max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Filter by actor, claim ID or action…" className="pl-9 bg-card" />
-        </div>
-        <div className="flex gap-1 text-xs">
-          {["All", "Settlements", "Liability", "Documents", "Permissions", "Matrixs"].map((t, i) => (
-            <button key={t} className={`px-3 py-1.5 rounded-md ${i === 0 ? "bg-accent text-accent-foreground" : "bg-card hover:bg-muted"}`}>{t}</button>
-          ))}
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter this page by person, claim or action…"
+            className="pl-9 bg-card"
+            aria-label="Filter audit events"
+          />
         </div>
       </div>
 
@@ -56,9 +65,15 @@ export default function Audit() {
           ) : error ? (
             <div className="p-6 text-sm text-destructive">Failed to load audit trail: {error.message}</div>
           ) : events.length === 0 ? (
-            <div className="p-6"><EmptyState title="No audit events" body="Collaboration activity will be recorded here as it happens." /></div>
+            <div className="p-6">
+              <EmptyState
+                title={query ? "No events match" : "No audit events"}
+                body={query ? "Try a different name, claim or action." : "Activity is recorded here as it happens."}
+              />
+            </div>
           ) : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="bg-muted/60 text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="text-left px-5 py-3 w-56">Timestamp</th>
@@ -71,21 +86,25 @@ export default function Audit() {
               <tbody className="divide-y">
                 {events.map((e) => (
                   <tr key={e.id} className="hover:bg-muted/40 align-top">
-                    <td className="px-5 py-3 font-mono text-xs text-muted-foreground">{e.timestamp}</td>
+                    <td className="px-5 py-3 font-mono text-xs text-muted-foreground">{e.timestamp ? new Date(e.timestamp).toLocaleString() : "—"}</td>
                     <td className="px-5 py-3">
                       <div className="font-medium">{e.actor}</div>
-                      <div className="text-xs text-muted-foreground">{e.actorCompany}</div>
+                      {e.actorCompany && <div className="text-xs text-muted-foreground">{e.actorCompany}</div>}
                     </td>
                     <td className="px-5 py-3"><StatusBadge variant="info">{e.action}</StatusBadge></td>
-                    <td className="px-5 py-3 font-mono text-xs">{e.target}</td>
+                    <td className="px-5 py-3 text-xs">
+                      {e.matrixCode ? <Link to={`/claims/${e.matrixCode}`} className="font-mono text-accent hover:underline">{e.matrixCode}</Link> : null}
+                      {e.target && e.target !== e.matrixCode && <div className="text-muted-foreground">{e.target}</div>}
+                    </td>
                     <td className="px-5 py-3">
-                      <div className="text-xs text-muted-foreground line-through">{e.oldValue ?? "—"}</div>
-                      <div className="font-medium">{e.newValue}</div>
+                      {e.oldValue && <div className="text-xs text-muted-foreground line-through">{e.oldValue}</div>}
+                      <div className="font-medium">{e.newValue ?? "—"}</div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </CardContent>
       </Card>

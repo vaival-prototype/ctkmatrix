@@ -1,15 +1,17 @@
 import { useState, useEffect } from "react";
-import { getCompanies } from "@/services/companyService";
+import { getAutoAppClaims } from "@/services/autoAppService";
 import { pickList } from "@/services/api";
 
-export function useCompanies(refreshKey = 0) {
+export function useAutoAppClaims(refreshKey = 0) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    getCompanies()
+    setLoading(true);
+    setError(null);
+    getAutoAppClaims()
       .then((res) => {
         if (!controller.signal.aborted) setData(pickList(res).items);
       })

@@ -40,3 +40,20 @@ export function acceptInvitation(payload) {
   // payload: { code, password, fullName }
   return apiPost("/auth/accept-invitation", payload);
 }
+
+/** Simulated single sign-on from the Claim Toolkit Auto / Compliance app. */
+export function ssoLogin(payload) {
+  // payload: { email }
+  return apiPost("/auth/sso", payload);
+}
+
+/** Looks up the account behind an emailed set-password link. */
+export function getPasswordToken(token) {
+  return apiGet(`/auth/password-token?token=${encodeURIComponent(token)}`);
+}
+
+/** Sets the password from an emailed link and starts a session. */
+export function setPassword(payload) {
+  // payload: { token, password }
+  return apiPost("/auth/set-password", payload);
+}

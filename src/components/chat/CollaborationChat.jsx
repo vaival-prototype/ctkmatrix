@@ -51,12 +51,12 @@ export default function CollaborationChat() {
         title="Contact rolodex"
         aria-label="Open contact rolodex"
         onClick={() => setOpen(true)}
-        className="fixed bottom-24 right-4 z-40 flex w-20 flex-col items-center gap-1 rounded-md px-1 py-1.5 text-primary-foreground hover:bg-primary-foreground/10 lg:right-4"
+        className="fixed bottom-[4.5rem] right-4 z-40 flex w-20 flex-col items-center gap-0.5 rounded-md px-1 py-1 text-primary-foreground hover:bg-primary-foreground/10 lg:right-4"
       >
-        <span className="flex h-11 w-11 items-center justify-center rounded-sm bg-accent text-accent-foreground shadow-lg ring-1 ring-primary-foreground/15">
-          <MessageSquare className="h-6 w-6" />
+        <span className="flex h-9 w-9 items-center justify-center rounded-sm bg-accent text-accent-foreground shadow-lg ring-1 ring-primary-foreground/15">
+          <MessageSquare className="h-5 w-5" />
         </span>
-        <span className="text-center text-[10px] font-semibold leading-tight text-primary-foreground">
+        <span className="text-center text-[9px] font-semibold leading-tight text-primary-foreground">
           Chat
         </span>
       </button>

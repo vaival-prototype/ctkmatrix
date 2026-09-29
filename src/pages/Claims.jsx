@@ -12,6 +12,7 @@ import { CounterpartyChat } from "@/components/counterparty/CounterpartyChat";
 import { useClaims } from "@/hooks/useClaims";
 import { useAccessTier } from "@/hooks/useAccessTier";
 import { Search, Filter, ArrowRightLeft, Building2, GitBranch, Clock, MessageSquare, Sparkles } from "lucide-react";
+import { formatMoney, sourceLabel } from "@/utils/claimDisplay";
 
 function humanizeStatus(s = "") {
   return s.replace(/-/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
@@ -23,18 +24,20 @@ function normalizeCode(s) {
 
 function statusVariant(s = "") {
   const v = s.toLowerCase();
+  if (v === "ready") return "ready";
   if (v.includes("accept") || v.includes("settled") || v.includes("closed")) return "success";
   if (v.includes("dispute") || v.includes("contest") || v.includes("reject")) return "danger";
   if (v.includes("review")) return "warning";
   return "info";
 }
 
-const STATUS_FILTERS = ["All", "Negotiating", "Review", "Disputed", "Settled"];
+const STATUS_FILTERS = ["All", "Ready", "Negotiating", "Review", "Disputed", "Settled"];
+
 
 // Reuses the same real status→variant mapping the status badges already render with —
 // "Negotiating" is every non-review/disputed/settled status (sent, viewed, negotiation-active,
 // settlement-proposed/countered, etc.), not a separate status of its own.
-const FILTER_VARIANT = { Negotiating: "info", Review: "warning", Disputed: "danger", Settled: "success" };
+const FILTER_VARIANT = { Ready: "ready", Negotiating: "info", Review: "warning", Disputed: "danger", Settled: "success" };
 
 // The API claim shape is leaner than the counterparty card needs; adapt it
 // and derive a best-effort contact from the recipient company.
@@ -44,8 +47,10 @@ function adaptClaim(c) {
     subject: c.title,
     parties: c.participants ?? [c.initiator, c.recipient].filter(Boolean),
     status: c.status,
+    statusLabel: c.statusLabel,
+    source: sourceLabel(c),
     liability: c.liability,
-    value: c.exposure,
+    value: formatMoney(c.exposure, c.exposureCurrency) ?? "—",
     updated: c.updated,
     contact: {
       name: c.recipient ?? "Counterparty",
@@ -128,6 +133,7 @@ function ContactCard({ contact, claimId, subject, onChatOpen }) {
 export default function Claims() {
   const { data, loading, error } = useClaims();
   const { capabilities } = useAccessTier();
+  const canStart = !!capabilities.initiate;
   const [chatOpen, setChatOpen] = useState(false);
   const [chatClaimId, setChatClaimId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -177,7 +183,7 @@ export default function Claims() {
             <Button variant="outline" size="sm" disabled title="Filtering isn't available yet">
               <Filter className="h-4 w-4" /> Filter <StatusBadge variant="warning"><Sparkles className="h-3 w-3" /> Coming soon</StatusBadge>
             </Button>
-            <Button asChild size="sm"><Link to="/new-shared-claim"><ArrowRightLeft className="h-4 w-4" /> Initiate Matrix</Link></Button>
+            {canStart && <Button asChild size="sm"><Link to="/new-shared-claim"><ArrowRightLeft className="h-4 w-4" /> Initiate Matrix</Link></Button>}
           </>
         }
       />
@@ -206,9 +212,11 @@ export default function Claims() {
                 <Button onClick={handleFindMatrix} disabled={!searchQuery.trim()} className="whitespace-nowrap">
                   <Search className="h-4 w-4" /> Find Matrix
                 </Button>
-                <Button asChild variant="outline" className="whitespace-nowrap">
-                  <Link to="/new-shared-claim"><ArrowRightLeft className="h-4 w-4" /> Initiate Matrix</Link>
-                </Button>
+                {canStart && (
+                  <Button asChild variant="outline" className="whitespace-nowrap">
+                    <Link to="/new-shared-claim"><ArrowRightLeft className="h-4 w-4" /> Initiate Matrix</Link>
+                  </Button>
+                )}
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2 text-xs">
@@ -247,11 +255,13 @@ export default function Claims() {
       ) : claims.length === 0 ? (
         <EmptyState
           title="Data not found"
-          body="No claim matrixs are available yet. Shared matrixs created from Claim Toolkit Auto packages will appear here."
+          body="There are no claims here yet. Claims you start, or are invited to, will appear here."
           action={
-            <Button asChild variant="outline">
-              <Link to="/new-shared-claim">Initiate Matrix</Link>
-            </Button>
+            canStart ? (
+              <Button asChild variant="outline">
+                <Link to="/new-shared-claim">Initiate Matrix</Link>
+              </Button>
+            ) : null
           }
         />
       ) : filteredClaims.length === 0 ? (
@@ -259,7 +269,8 @@ export default function Claims() {
       ) : (
         <Card className="shadow-card border-accent/50 overflow-hidden">
           <CardContent className="p-0">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
               <thead className="bg-muted/60 text-muted-foreground text-xs uppercase tracking-wider">
                 <tr>
                   <th className="text-left px-5 py-3 font-medium">Claim</th>
@@ -278,7 +289,7 @@ export default function Claims() {
                       <MatrixCell claimId={c.id} className="px-5 py-4">
                         <div className="text-xs font-mono text-muted-foreground">{c.id}</div>
                         <div className="font-medium text-foreground">{c.subject}</div>
-                        <div className="mt-0.5 text-[11px] text-muted-foreground">Source: Claim Toolkit Auto package</div>
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">Source: {c.source}</div>
                       </MatrixCell>
                     </td>
                     <td>
@@ -298,8 +309,8 @@ export default function Claims() {
                     </td>
                     <td>
                       <MatrixCell claimId={c.id} className="px-5 py-4">
-                        <StatusBadge variant={statusVariant(c.status)}>
-                          {humanizeStatus(c.status)}
+                        <StatusBadge variant={c.status === "ready" ? "warning" : statusVariant(c.status)}>
+                          {c.statusLabel ?? humanizeStatus(c.status)}
                         </StatusBadge>
                       </MatrixCell>
                     </td>
@@ -322,6 +333,7 @@ export default function Claims() {
                 ))}
               </tbody>
             </table>
+            </div>
           </CardContent>
         </Card>
       )}

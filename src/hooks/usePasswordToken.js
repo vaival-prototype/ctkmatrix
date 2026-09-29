@@ -1,17 +1,23 @@
 import { useState, useEffect } from "react";
-import { getCompanies } from "@/services/companyService";
-import { pickList } from "@/services/api";
+import { getPasswordToken } from "@/services/authService";
+import { pickData } from "@/services/api";
 
-export function useCompanies(refreshKey = 0) {
+export function usePasswordToken(token) {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!!token);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!token) {
+      setLoading(false);
+      return undefined;
+    }
     const controller = new AbortController();
-    getCompanies()
+    setLoading(true);
+    setError(null);
+    getPasswordToken(token)
       .then((res) => {
-        if (!controller.signal.aborted) setData(pickList(res).items);
+        if (!controller.signal.aborted) setData(pickData(res));
       })
       .catch((err) => {
         if (!controller.signal.aborted) setError(err);
@@ -20,7 +26,7 @@ export function useCompanies(refreshKey = 0) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [refreshKey]);
+  }, [token]);
 
   return { data, loading, error };
 }

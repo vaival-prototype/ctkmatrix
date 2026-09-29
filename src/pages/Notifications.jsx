@@ -33,6 +33,7 @@ function toneClass(tone) {
 export default function Notifications() {
   const { data, loading, error } = useNotifications();
   const [readAll, setReadAll] = useState(false);
+  const [filter, setFilter] = useState("All");
 
   async function handleMarkAll() {
     try {
@@ -44,7 +45,8 @@ export default function Notifications() {
     }
   }
 
-  const items = (data ?? []).map((n) => (readAll ? { ...n, unread: false } : n));
+  const allItems = (data ?? []).map((n) => (readAll ? { ...n, unread: false } : n));
+  const items = filter === "Unread" ? allItems.filter((n) => n.unread) : allItems;
 
   // Group by an optional `group` label, preserving arrival order.
   const groups = [];
@@ -59,12 +61,8 @@ export default function Notifications() {
   }
 
   const filters = [
-    { l: "All", c: items.length, on: true },
-    { l: "Settlements" },
-    { l: "Liability changes" },
-    { l: "Documents" },
-    { l: "Invitations" },
-    { l: "Comments" },
+    { l: "All", c: allItems.length },
+    { l: "Unread", c: allItems.filter((n) => n.unread).length },
   ];
 
   return (
@@ -84,9 +82,15 @@ export default function Notifications() {
         <Card className="lg:col-span-1 shadow-card border-accent/50 h-fit">
           <CardContent className="p-3">
             {filters.map((f) => (
-              <button key={f.l} className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${f.on ? "bg-accent text-accent-foreground" : "hover:bg-muted text-foreground"}`}>
+              <button
+                key={f.l}
+                type="button"
+                onClick={() => setFilter(f.l)}
+                aria-pressed={filter === f.l}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-md text-sm ${filter === f.l ? "bg-accent text-accent-foreground" : "hover:bg-muted text-foreground"}`}
+              >
                 <span>{f.l}</span>
-                {f.c != null && <span className={`text-xs ${f.on ? "opacity-80" : "text-muted-foreground"}`}>{f.c}</span>}
+                <span className={`text-xs ${filter === f.l ? "opacity-80" : "text-muted-foreground"}`}>{f.c}</span>
               </button>
             ))}
           </CardContent>

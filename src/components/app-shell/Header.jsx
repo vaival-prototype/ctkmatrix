@@ -7,7 +7,7 @@ import UserMenu from "./UserMenu";
 import { useAccessTier } from "@/hooks/useAccessTier";
 
 export default function Header({ pathname }) {
-  const { tierKey } = useAccessTier();
+  const { capabilities } = useAccessTier();
   return (
     <header className="h-16 bg-primary text-primary-foreground border-b-4 border-accent flex items-center gap-4 px-6 sticky top-0 z-30">
       {/* Logo */}
@@ -19,15 +19,15 @@ export default function Header({ pathname }) {
       {/* Desktop top nav */}
       <TopNav pathname={pathname} />
 
-      {/* Onboard button — a company-level admin action, not relevant to a
-          single-claim Claim Party account */}
-      {tierKey !== "level4" && (
+      {/* Onboarding a company is an Admin-only action */}
+      {capabilities.manageUsers && (
         <Button
           asChild
           size="icon"
           variant="success"
           className="h-10 w-10 shrink-0"
           title="Onboard company"
+          aria-label="Onboard company"
         >
           <Link to="/companies/onboarding">
             <Plus className="h-5 w-5" />

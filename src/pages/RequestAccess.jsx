@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, CheckCircle2, ClipboardCheck, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createAccessRequest } from "@/services/accessService";
 import { ApiError } from "@/services/api";
+import Spinner from "@/components/shared/Spinner";
+import { useInvitationLookup } from "@/hooks/useInvitationLookup";
 
 function validateEmail(email) {
   if (!email.trim()) return "Email is required";
@@ -17,12 +19,16 @@ function validateEmail(email) {
 }
 
 /**
- * Self-serve signup for someone who was never invited — the walk-in path
- * Mark described: no open registration, every request lands in an admin
- * review queue (see AdminAccessRequests.jsx) rather than granting access
- * immediately.
+ * Level 1 sign-up. Reached two ways: from an invite email
+ * (/request-access?invite=CODE — email locked to the invited address) or
+ * self-service from the sign-in page. Either way the request waits in the
+ * Approvals inbox; nobody gets an account until an Admin or Approver approves.
  */
 export default function RequestAccess() {
+  const [params] = useSearchParams();
+  const inviteCode = params.get("invite");
+  const { data: invite, loading: inviteLoading, error: inviteError } = useInvitationLookup(inviteCode);
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [company, setCompany] = useState("");
@@ -30,6 +36,13 @@ export default function RequestAccess() {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);
+
+  useEffect(() => {
+    if (!invite) return;
+    setEmail(invite.email ?? "");
+    setName((current) => current || invite.name || "");
+    setCompany((current) => current || invite.company || "");
+  }, [invite]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -43,7 +56,7 @@ export default function RequestAccess() {
 
     setSubmitting(true);
     try {
-      await createAccessRequest({ name, email, company, reason });
+      await createAccessRequest({ name, email, company, reason, inviteCode: invite ? inviteCode : undefined });
       setSent(true);
     } catch (err) {
       if (err instanceof ApiError && err.fields) setErrors(err.fields);
@@ -53,8 +66,12 @@ export default function RequestAccess() {
     }
   }
 
+  if (inviteCode && inviteError?.code === "invitation_expired") return <Navigate to="/access-expired" replace />;
+  if (inviteCode && inviteLoading) return <Spinner />;
+  const inviteUnusable = !!inviteCode && (!!inviteError || (invite && (invite.inviteType !== "company-user" || invite.status !== "Sent")));
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-6 py-12">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-12 sm:px-6">
       <Card className="w-full max-w-lg border-border/60 shadow-elevated">
         <CardContent className="p-6">
           <Link to="/signin" className="mb-5 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
@@ -65,16 +82,29 @@ export default function RequestAccess() {
             <div>
               <h1 className="text-xl font-semibold">Request Claim Matrix access</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Don't have an invitation? Tell us who you are and your request goes to our team for manual review before any account is created.
+                {invite && !inviteUnusable
+                  ? `${invite.invitedBy} invited you to “${invite.matrixTitle}”. Tell us about your company — once approved you'll get an email to set your password.`
+                  : "Tell us who you are. Your request is reviewed before any account is created."}
               </p>
             </div>
           </div>
+
+          {inviteUnusable && !sent && (
+            <div className="mb-4 rounded-md border border-warning/60 bg-warning/10 p-3 text-sm" role="alert">
+              {inviteError?.message ||
+                (invite?.status && invite.status !== "Sent"
+                  ? "This invitation has already been used."
+                  : "This invitation doesn't need an access request.")}{" "}
+              You can still request access below without it.
+            </div>
+          )}
 
           {sent ? (
             <div className="rounded-md border border-accent/40 bg-accent/10 p-4">
               <div className="flex items-center gap-2 text-sm font-medium text-foreground"><CheckCircle2 className="h-4 w-4 text-accent" /> Request submitted</div>
               <p className="mt-1 text-sm text-muted-foreground">
-                We'll verify <span className="font-medium text-foreground">{company}</span> and follow up at <span className="font-medium text-foreground">{email}</span> once reviewed.
+                Your request for <span className="font-medium text-foreground">{company}</span> is waiting for approval. Once it's
+                approved we'll email <span className="font-medium text-foreground">{email}</span> a link to set your password.
               </p>
               <Button asChild variant="outline" className="mt-4 w-full"><Link to="/signin">Back to sign in</Link></Button>
             </div>
@@ -87,7 +117,16 @@ export default function RequestAccess() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ra-email">Work email</Label>
-                <Input id="ra-email" type="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} className={errors.email ? "border-destructive" : ""} />
+                <Input
+                  id="ra-email"
+                  type="email"
+                  placeholder="you@company.com"
+                  value={email}
+                  readOnly={!!invite && !inviteUnusable}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={`${errors.email ? "border-destructive" : ""} ${invite && !inviteUnusable ? "bg-muted/40" : ""}`}
+                />
+                {invite && !inviteUnusable && <p className="text-xs text-muted-foreground">Must match the email the invitation was sent to.</p>}
                 {errors.email && <p className="text-xs text-destructive">{errors.email}</p>}
               </div>
               <div className="space-y-1.5">
@@ -101,7 +140,8 @@ export default function RequestAccess() {
               </div>
               <p className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
                 <ClipboardCheck className="mr-1 inline h-3.5 w-3.5 text-accent" />
-                New accounts start as a free receiver. You'll be able to request initiator access once your account is approved.
+                New accounts start at Level 1: you can work on claims you're invited to. To start your own, request an
+                upgrade after you sign in.
               </p>
               <Button type="submit" className="w-full" disabled={submitting}>{submitting ? "Submitting…" : "Submit request"}</Button>
             </form>

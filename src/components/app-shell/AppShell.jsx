@@ -13,11 +13,19 @@ const isClaimDetailRoute = (pathname) => /^\/claims\/[^/]+$/.test(pathname);
 
 export default function AppShell({ children }) {
   const { pathname } = useLocation();
-  const { tierKey } = useAccessTier();
-  // Level 4 (Claim Party) accounts are scoped to a single claim, not the
-  // whole platform — the module sidebar (Auto/Compliance/Audit/Claim
-  // Management/Admin/Demo) and the global chat widget don't apply to them.
+  const { tierKey, capabilities } = useAccessTier();
+  // Level 4 (a person in the claim) only ever sees the claims shared with
+  // them — no module sidebar. Chat and Ask CTK follow the account's access.
   const isClaimParty = tierKey === "level4";
+  const hasAskCtk = [
+    "askCtkStateSummary",
+    "askCtkCaseSummary",
+    "askCtkStatementSummaries",
+    "askCtkHistories",
+  ].some((key) => capabilities[key]);
+  const showChat = !isClaimDetailRoute(pathname) && !!capabilities.chat;
+  // Chat sits above Ask CTK, so it only needs the taller inset when both show.
+  const sidebarInset = showChat ? "chatAndAskCtk" : hasAskCtk ? "askCtk" : "none";
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -30,11 +38,11 @@ export default function AppShell({ children }) {
       </div>
 
       {/* Right sidebar */}
-      {!isClaimParty && <Sidebar />}
+      {!isClaimParty && <Sidebar bottomInset={sidebarInset} />}
 
       {/* Floating widgets */}
-      {!isClaimDetailRoute(pathname) && !isClaimParty && <CollaborationChat />}
-      <CTKAssistant pathname={pathname} />
+      {showChat && <CollaborationChat />}
+      {hasAskCtk && <CTKAssistant pathname={pathname} />}
     </div>
   );
 }

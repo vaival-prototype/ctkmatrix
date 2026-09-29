@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CheckCircle2, ShieldCheck, Users, FileSearch, GitBranch } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { lookupInvitation } from "@/services/authService";
-import { ApiError, pickData } from "@/services/api";
+import { ApiError } from "@/services/api";
+import { useInvitationLookup } from "@/hooks/useInvitationLookup";
 
 function useFormField(initialValue = "") {
   const [value, setValue] = useState(initialValue);
@@ -55,35 +55,15 @@ export default function AcceptInvitation() {
   const fullName = useFormField("");
   const password = useFormField("");
   const confirm = useFormField("");
-  const [preview, setPreview] = useState(null);
-  // Gates the submit button until the invitation lookup resolves. Starts true
-  // when a code is present so the button is disabled during the initial fetch.
-  const [lookupLoading, setLookupLoading] = useState(() => Boolean(code));
+  const { data: preview, loading: lookupLoading, error: lookupError } = useInvitationLookup(code || null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
 
-  // Preview the invitation (invited email / company / role) for context.
+  // Prefill the name the inviter entered (the setter is a stable useState setter).
+  const setFullName = fullName.setValue;
   useEffect(() => {
-    if (!code) {
-      setLookupLoading(false);
-      return;
-    }
-    let active = true;
-    setLookupLoading(true);
-    lookupInvitation(code)
-      .then((res) => {
-        if (active) setPreview(pickData(res));
-      })
-      .catch(() => {
-        // A bad code surfaces on submit; the preview is best-effort only.
-      })
-      .finally(() => {
-        if (active) setLookupLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [code]);
+    if (preview?.name) setFullName((current) => current || preview.name);
+  }, [preview, setFullName]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -122,6 +102,19 @@ export default function AcceptInvitation() {
       setSubmitting(false);
     }
   }
+
+  // Level 1 (company user) invites go through Request Access + approval instead.
+  if (preview?.inviteType === "company-user") return <Navigate to={`/request-access?invite=${code}`} replace />;
+  if (lookupError?.code === "invitation_expired") return <Navigate to="/access-expired" replace />;
+  const blockedReason = !code
+    ? "This link is missing its invitation code."
+    : lookupError
+      ? lookupError.message
+      : preview && preview.status !== "Sent"
+        ? "This invitation has already been used."
+        : preview?.accountExists
+          ? "You already have a Claim Matrix account for this email."
+          : "";
 
   return (
     <div className="min-h-screen grid lg:grid-cols-2 bg-background">
@@ -177,9 +170,22 @@ export default function AcceptInvitation() {
           </div>
 
           <h2 className="text-2xl font-semibold tracking-tight">Set your password</h2>
-          <p className="mt-2 text-sm text-muted-foreground">Create a password to finish setting up your account.</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {preview?.invitedBy
+              ? `${preview.invitedBy} shared a claim with you. Create a password to view it.`
+              : "Create a password to finish setting up your account."}
+          </p>
 
-          {preview && (
+          {blockedReason && !lookupLoading && (
+            <div className="mt-6 space-y-3 rounded-md border border-warning/60 bg-warning/10 p-4 text-sm" role="alert">
+              <p>{blockedReason}</p>
+              <Button asChild size="sm" variant="outline">
+                <Link to="/signin">Go to sign in</Link>
+              </Button>
+            </div>
+          )}
+
+          {preview && !blockedReason && (
             <div className="mt-6 rounded-md border border-accent/40 bg-accent/10 p-3 text-sm">
               <div className="flex items-center gap-2 font-medium text-foreground">
                 <CheckCircle2 className="h-4 w-4 text-accent" /> Invitation verified
@@ -187,12 +193,13 @@ export default function AcceptInvitation() {
               <dl className="mt-2 space-y-1 text-muted-foreground">
                 {preview.email && <div className="flex justify-between gap-3"><dt>Email</dt><dd className="text-foreground">{preview.email}</dd></div>}
                 {preview.company && <div className="flex justify-between gap-3"><dt>Company</dt><dd className="text-foreground">{preview.company}</dd></div>}
-                {preview.role && <div className="flex justify-between gap-3"><dt>Role</dt><dd className="text-foreground">{preview.role}</dd></div>}
+                {preview.role && <div className="flex justify-between gap-3"><dt>Access</dt><dd className="text-foreground">{preview.role}</dd></div>}
                 {preview.matrixTitle && <div className="flex justify-between gap-3"><dt>Matrix</dt><dd className="text-foreground text-right">{preview.matrixTitle}</dd></div>}
               </dl>
             </div>
           )}
 
+          {!blockedReason && (
           <form className="mt-6 space-y-4" onSubmit={handleSubmit} noValidate>
             <div className="space-y-1.5">
               <Label htmlFor="invite-name">Full name</Label>
@@ -252,9 +259,10 @@ export default function AcceptInvitation() {
                   : "Create account & continue"}
             </Button>
           </form>
+          )}
 
           <p className="mt-6 text-sm text-center text-muted-foreground">
-            I already have an account? <Link to="/signin" className="text-accent hover:underline font-medium">Sign in</Link>
+            Already have an account? <Link to="/signin" className="text-accent hover:underline font-medium">Sign in</Link>
           </p>
         </div>
       </div>

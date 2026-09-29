@@ -17,7 +17,23 @@ export function createAccessRequest(payload) {
   return apiPost("/access-requests", payload);
 }
 
-export function decideAccessRequest(id, decision, note) {
-  // decision: "approve" | "reject"
-  return apiPost(`/access-requests/${id}/decision`, { decision, note });
+export function decideAccessRequest(id, payload) {
+  // payload: { decision: "approve" | "reject", companyMode?: "new" | "existing", companyId?, note? }
+  return apiPost(`/access-requests/${id}/decision`, payload);
+}
+
+// Level 1 → Level 2/3 upgrade requests. Level 1 users see only their own;
+// Admin and Approvers see the full queue.
+export function getUpgradeRequests() {
+  return apiGet("/upgrade-requests");
+}
+
+export function createUpgradeRequest(payload) {
+  // payload: { note }
+  return apiPost("/upgrade-requests", payload);
+}
+
+export function decideUpgradeRequest(id, payload) {
+  // payload: { decision: "approve" | "reject", level?: "level2" | "level3", note? }
+  return apiPost(`/upgrade-requests/${id}/decision`, payload);
 }

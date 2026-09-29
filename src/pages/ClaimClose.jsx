@@ -13,7 +13,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { closeClaimMatrix } from "@/services/claimService";
 import { useClaimDetail } from "@/hooks/useClaimDetail";
-import { usePermissions } from "@/hooks/usePermissions";
+import { useAccessTier } from "@/hooks/useAccessTier";
+import NoAccess from "@/components/shared/NoAccess";
 import { Archive, ArrowLeft, CheckCircle2 } from "lucide-react";
 
 const matrixStatusJourney = [
@@ -63,8 +64,9 @@ export default function ClaimClose() {
   const { claimId } = useParams();
   const navigate = useNavigate();
   const { data: claim, loading, error } = useClaimDetail(claimId);
-  const { can } = usePermissions();
-  const canClose = can("close-matrix");
+  const { isAdmin } = useAccessTier();
+  // Only the person who started the Matrix, or an Admin, can close it.
+  const canClose = !!claim && claim.status !== "closed" && (isAdmin || claim.isInitiator);
   const [checks, setChecks] = useState(() => checklistItems.map(() => true));
   const [notes, setNotes] = useState(
     "Matrix closed after settlement acceptance. Final outcome retained for audit and future analytics."
@@ -94,6 +96,17 @@ export default function ClaimClose() {
   }
 
   if (loading) return <Spinner />;
+
+  if (error?.status === 403) return <NoAccess title="You don't have access to this claim" />;
+
+  if (claim && !canClose) {
+    return (
+      <NoAccess
+        title={claim.status === "closed" ? "This claim is already closed" : "Only the person who started this Matrix can close it"}
+        body="An Admin can also close any claim."
+      />
+    );
+  }
 
   if (error || !claim) {
     return (

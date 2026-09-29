@@ -71,6 +71,8 @@ export function AuthProvider({ children }) {
   const [user, setUserState] = useState(() => readStoredUser());
   // Session is read synchronously from storage, so there's nothing to await.
   const [loading, setLoading] = useState(false);
+  // True once the session ended through logout (not an expired/missing session).
+  const [signedOut, setSignedOut] = useState(false);
 
   const setUser = useCallback((next) => {
     setUserState(next);
@@ -89,27 +91,52 @@ export function AuthProvider({ children }) {
     setLoading(false);
   }, []);
 
-  const login = useCallback(async (credentials) => {
-    const res = await authService.login(credentials);
-    const data = pickData(res);
-    const nextUser = pickUser(data, { email: credentials.email, name: credentials.email });
-    const token = pickToken(data, res);
-    persistSession(nextUser, token);
-    setUserState(nextUser);
-    return nextUser;
-  }, []);
-
-  // Accept an invitation = register + start a session. Mirrors login: the
-  // response carries a bearer token that MUST be persisted, or every following
-  // request 401s. `fallbackUser` (e.g. the previewed invite email) is used when
+  // Every way of signing in returns `{ user, token }`; the token MUST be
+  // persisted or every following request 401s. `fallbackUser` is used when
   // the response omits the user record.
-  const acceptInvitation = useCallback(async (payload, fallbackUser = null) => {
-    const res = await authService.acceptInvitation(payload);
+  const startSession = useCallback((res, fallbackUser) => {
     const data = pickData(res);
     const nextUser = pickUser(data, fallbackUser);
     const token = pickToken(data, res);
     persistSession(nextUser, token);
     setUserState(nextUser);
+    setSignedOut(false);
+    return nextUser;
+  }, []);
+
+  const login = useCallback(
+    async (credentials) =>
+      startSession(await authService.login(credentials), { email: credentials.email, name: credentials.email }),
+    [startSession]
+  );
+
+  // Simulated single sign-on: already signed in to the Claim Toolkit Auto or
+  // Compliance app, so Matrix opens without its own sign-in.
+  const ssoLogin = useCallback(
+    async (email) => startSession(await authService.ssoLogin({ email }), null),
+    [startSession]
+  );
+
+  // Accept an invitation = register + start a session.
+  const acceptInvitation = useCallback(
+    async (payload, fallbackUser = null) => startSession(await authService.acceptInvitation(payload), fallbackUser),
+    [startSession]
+  );
+
+  // Set a password from an emailed link = activate the account + start a session.
+  const completePasswordSetup = useCallback(
+    async (payload) => startSession(await authService.setPassword(payload), null),
+    [startSession]
+  );
+
+  // Re-read the signed-in user from the server (e.g. after an upgrade was approved).
+  const refreshFromServer = useCallback(async () => {
+    const res = await authService.getCurrentUser();
+    const nextUser = pickData(res);
+    if (nextUser) {
+      persistSession(nextUser, null);
+      setUserState(nextUser);
+    }
     return nextUser;
   }, []);
 
@@ -121,6 +148,7 @@ export function AuthProvider({ children }) {
     } finally {
       clearSession();
       setUserState(null);
+      setSignedOut(true);
     }
   }, []);
 
@@ -128,8 +156,12 @@ export function AuthProvider({ children }) {
     user,
     loading,
     isAuthenticated: !!user,
+    signedOut,
     login,
+    ssoLogin,
     acceptInvitation,
+    completePasswordSetup,
+    refreshFromServer,
     logout,
     refresh,
     setUser,

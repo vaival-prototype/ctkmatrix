@@ -69,7 +69,7 @@ async function request(path, { method = "GET", body, isForm = false } = {}) {
   if (USE_MOCK) {
     // Lazy import avoids any load-order coupling with the resolver.
     const { resolveMock } = await import("./mockResolver");
-    return resolveMock(path, method, body);
+    return resolveMock(path, method, body, authToken());
   }
 
   const init = {

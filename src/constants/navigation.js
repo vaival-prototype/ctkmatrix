@@ -8,13 +8,14 @@ export const topNav = [
   { to: "/claims", label: "Find Matrix", icon: "FolderKanban" },
 ];
 
+// `show` decides who sees each tile — see useModuleNav.js.
 export const moduleNav = [
-  { to: "/claims", label: "Auto Liability", icon: "Car" },
-  { to: "/compliance-matrix-entry", label: "Compliance", icon: "FileSearch" },
-  { to: "/audit-matrix-entry", label: "Audit", icon: "ClipboardList" },
-  { to: "/dashboard", label: "Claim Matrix", icon: "ClipboardCheck" },
-  { to: "/claim-management", label: "Claim Management", icon: "Handshake" },
-  { to: "/admin/company-enablement", label: "Admin", icon: "ShieldCheck" },
-  { to: "/demo", label: "Demo Map", icon: "Route" },
-  { to: "/settings", label: "Support", icon: "HelpCircle" },
+  { to: "/claims", label: "Auto Liability", icon: "Car", show: "auto" },
+  { to: "/compliance-matrix-entry", label: "Compliance", icon: "FileSearch", show: "compliance" },
+  { to: "/audit-matrix-entry", label: "Audit", icon: "ClipboardList", show: "admin" },
+  { to: "/claim-management", label: "Claim Management", icon: "Handshake", show: "caseManagement" },
+  { to: "/approvals", label: "Approvals", icon: "Inbox", show: "approvals" },
+  { to: "/audit", label: "Audit Trail", icon: "ScrollText", show: "auditTrail" },
+  { to: "/admin/company-enablement", label: "Admin", icon: "ShieldCheck", show: "manageUsers" },
+  { to: "/settings", label: "Support", icon: "HelpCircle", show: "everyone" },
 ];

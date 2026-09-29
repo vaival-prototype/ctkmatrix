@@ -53,3 +53,14 @@ export function closeClaimMatrix(id, payload) {
 export function submitClaimDecision(id, payload) {
   return apiPost(`/claims/${id}/decisions`, payload);
 }
+
+/** Invite more people to a claim that is already shared. */
+export function inviteToClaim(id, payload) {
+  // payload: { invitees: [{ email, name?, company?, type?: "company-user" | "claim-party" }], message? }
+  return apiPost(`/claims/${id}/invitations`, payload);
+}
+
+/** Is this email already a Claim Matrix / Claim Toolkit account? Used while inviting. */
+export function lookupDirectory(email) {
+  return apiGet(`/directory/lookup?email=${encodeURIComponent(email)}`);
+}

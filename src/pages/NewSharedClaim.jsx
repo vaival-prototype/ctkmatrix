@@ -15,35 +15,37 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useClaimPackages } from "@/hooks/useClaimPackages";
-import { useCompanies } from "@/hooks/useCompanies";
 import { useAccessTier } from "@/hooks/useAccessTier";
+import { useAuth } from "@/context/AuthContext";
+import InviteesField from "@/components/shared/InviteesField";
+import EmptyState from "@/components/shared/EmptyState";
+import { emptyInvitee, toInviteePayload, validateInvitees } from "@/utils/invitees";
+import { resolveLookups } from "@/utils/inviteeLookup";
 import { createClaimMatrix } from "@/services/claimService";
 import { pickData } from "@/services/api";
 import { US_STATES, ACCIDENT_TYPES, SCENE_CONDITIONS } from "@/constants/usStates";
 import {
-  ArrowLeft, ArrowRightLeft, Building2, CheckCircle2, FileText, Lock, Mail,
-  MessageSquareWarning, PenLine, ShieldCheck, Upload, UserPlus, Workflow,
+  ArrowLeft, ArrowRightLeft, ArrowUpCircle, Building2, CheckCircle2, FileText, Lock, Mail,
+  MessageSquareWarning, PenLine, ShieldCheck, Upload, Workflow,
 } from "lucide-react";
 
 const STEP_LABELS = ["Origin", "Details", "Documents", "Recipient", "Review & Send", "Collaboration"];
 
-const TIER_ORIGIN_COPY = {
-  level3: {
-    title: "Claim Toolkit Auto",
-    body: "Your account is a Level 3 (CTK Auto) user, so matrices you initiate always pull from an existing Claim Toolkit Auto claim — assessment, liability data, and documents come across automatically.",
-  },
-  level2: {
-    title: "Manual entry",
-    body: "Level 2 (CTK Compliance) users have no Claim Toolkit Auto claim behind a matter, so matrices are entered directly: accident facts, location, and documents are captured by hand and the matrix opens straight into negotiation.",
-  },
+const INVITE_STATUS_VARIANT = {
+  Active: "success",
+  Invited: "info",
+  "Awaiting password": "info",
+  "Already in this claim": "muted",
 };
+
+const LEVEL_LABEL = { admin: "Admin", approver: "Approver", level1: "Level 1", level2: "Level 2", level3: "Level 3", level4: "Level 4" };
 
 function wizardTitle(step, origin) {
   return [
     "How this matrix will start",
     origin === "auto" ? "Select claim from Auto" : "Claim details",
     origin === "auto" ? "Select package contents" : "Upload documents",
-    "Choose recipient & invite",
+    "Choose who to invite",
     "Review & send",
     "Shared collaboration space",
   ][step - 1] ?? "Review";
@@ -53,20 +55,36 @@ function Field({ label, children, className }) {
   return <div className={`space-y-1.5 ${className ?? ""}`}><Label className="text-xs">{label}</Label>{children}</div>;
 }
 
-function NotificationPreview({ icon: Icon, label, value }) {
+function PackageFact({ icon: Icon, label, value }) {
   return (
-    <div className="rounded-md border bg-card p-3">
+    <div className="rounded-md border bg-background p-3">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon className="h-3.5 w-3.5 text-accent" /> {label}</div>
       <div className="mt-1 text-sm font-medium">{value}</div>
     </div>
   );
 }
 
-function PackageFact({ icon: Icon, label, value }) {
+function InviteeSummary({ invitees }) {
   return (
-    <div className="rounded-md border bg-background p-3">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon className="h-3.5 w-3.5 text-accent" /> {label}</div>
-      <div className="mt-1 text-sm font-medium">{value}</div>
+    <div className="rounded-md border bg-background p-4">
+      <div className="font-medium">Invitations to send</div>
+      <ul className="mt-3 space-y-2 text-sm">
+        {invitees.map((i) => (
+          <li key={i.key} className="flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0">
+              <span className="font-medium">{i.lookup?.known ? i.lookup.name : i.name}</span>{" "}
+              <span className="text-muted-foreground">{i.email}</span>
+            </span>
+            <StatusBadge variant={i.lookup?.known ? "success" : "info"}>
+              {i.lookup?.known
+                ? `Joins now · ${i.lookup.tierLabel}`
+                : i.type === "claim-party"
+                  ? "New · Level 4 · sets a password"
+                  : "New · Level 1 · needs approval"}
+            </StatusBadge>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -82,27 +100,21 @@ function HandoffStep({ title, body }) {
 
 export default function NewSharedClaim() {
   const [searchParams] = useSearchParams();
-  const appHint = ["level2"].includes(searchParams.get("app")) ? searchParams.get("app") : null;
+  // Embedded Compliance/Audit entry points open straight into manual entry.
+  const forceManual = searchParams.get("mode") === "manual" || searchParams.get("app") === "level2";
 
+  const { user } = useAuth();
+  const { tierKey, capabilities, loading: tierLoading } = useAccessTier();
+  const canUseAuto = !!capabilities.initiateFromAuto;
   const { data: packages, loading: packagesLoading } = useClaimPackages();
-  const { data: companiesData } = useCompanies();
-  const { tierKey, capabilities } = useAccessTier();
 
-  // Level 3 (CTK Auto) users can start either from an existing Auto claim or
-  // enter the matter manually — Auto brings assessment data across
-  // automatically but isn't the only starting point. Level 2 (CTK
-  // Compliance) has no Auto claim behind its matters, so it's locked to
-  // manual entry, same as an embedded Compliance/Audit origin hint.
-  const originTierKey = appHint || tierKey;
-  const canChooseOrigin = tierKey === "level3" && !appHint;
-  // Level 2 (CTK Compliance) sees both starting-point options, same as Level
-  // 3, but the Auto card is shown locked with an upgrade message rather than
-  // hidden outright — makes clear what unlocks with a CTK Auto account.
-  const showOriginPicker = tierKey === "level3" || originTierKey === "level2";
-  const autoOptionLocked = originTierKey === "level2" && tierKey !== "level3";
+  // Admin and Level 3 choose Auto (their own ready claims) or manual entry;
+  // Level 2 is manual entry only (the Auto card is shown locked).
+  const canChooseOrigin = canUseAuto && !forceManual;
+  const showOriginPicker = !!capabilities.initiate;
+  const autoOptionLocked = !canUseAuto;
   const [originChoice, setOriginChoice] = useState(null);
-  const origin = canChooseOrigin ? (originChoice ?? "auto") : (originTierKey === "level3" ? "auto" : "manual");
-  const originCopy = TIER_ORIGIN_COPY[originTierKey] ?? TIER_ORIGIN_COPY.level2;
+  const origin = canChooseOrigin ? (originChoice ?? "auto") : "manual";
 
   const [step, setStep] = useState(1);
 
@@ -140,27 +152,19 @@ export default function NewSharedClaim() {
   const [sceneConditions, setSceneConditions] = useState([]);
   const [fileNames, setFileNames] = useState([]);
 
-  // Shared fields
-  // Recipient: either an existing company already in Matrix, or a party who
-  // isn't in the dropdown yet — a company not yet onboarded (routed through
-  // the holding queue) or an individual claim party (Level 4, receive-only,
-  // no chat). Mirrors Mark's origination flow: "the receiving party may be
-  // an insurance company... or an individual party to the case."
-  const [recipientMode, setRecipientMode] = useState("existing");
-  const [recipientCompany, setRecipientCompany] = useState("");
-  const [recipientAdjuster, setRecipientAdjuster] = useState("maria.chen@atlasmutual.com");
-  const [newRecipientType, setNewRecipientType] = useState("company");
-  const [newRecipientName, setNewRecipientName] = useState("");
-  const [newRecipientEmail, setNewRecipientEmail] = useState("");
-  const [invitedEmail, setInvitedEmail] = useState("claims-supervisor@atlasmutual.com");
-  const [permissionScope, setPermissionScope] = useState("comment-evidence");
+  // Who gets invited, and the note that goes in their email.
+  const [invitees, setInvitees] = useState(() => [emptyInvitee()]);
+  const [showInviteErrors, setShowInviteErrors] = useState(false);
+  const [checkingInvitees, setCheckingInvitees] = useState(false);
   const [message, setMessage] = useState(
-    "Please review the shared liability assessment and supporting documents. We are requesting confirmation or structured dispute response within 7 business days."
+    "Please review the shared claim and supporting documents, and respond within 7 business days."
   );
+  const [selectedDocs, setSelectedDocs] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [createdMatrixId, setCreatedMatrixId] = useState(null);
+  const [inviteResults, setInviteResults] = useState([]);
 
-  const claimPackageOptions = packages ?? [];
+  const claimPackageOptions = useMemo(() => packages ?? [], [packages]);
   const filteredClaimPackages = useMemo(() => {
     if (!findSearched) return claimPackageOptions;
     const num = findClaimNumber.trim().toLowerCase();
@@ -172,20 +176,14 @@ export default function NewSharedClaim() {
       (!adjuster || (claim.adjuster || "").toLowerCase().includes(adjuster))
     );
   }, [claimPackageOptions, findSearched, findClaimNumber, findInsured, findAdjuster]);
-  const companies = companiesData ?? [];
-  const recipientCompanies = companies.filter((company) => company.name !== "Northbridge Insurance");
-  const selectedClaim = claimPackageOptions.find((claim) => claim.id === selectedClaimId) ?? claimPackageOptions[0];
-  const selectedRecipientCompanyName = recipientCompanies.find((c) => c.id === recipientCompany)?.name ?? "";
-  // What actually goes to the API and shows in the review panel, whichever
-  // recipient mode is active.
-  const recipientDisplayName = recipientMode === "existing" ? selectedRecipientCompanyName : newRecipientName;
-  const recipientEmailForDisplay = recipientMode === "existing" ? recipientAdjuster : newRecipientEmail;
+  const selectedClaim = claimPackageOptions.find((claim) => claim.id === selectedClaimId) ?? null;
+  const inviteErrors = validateInvitees(invitees, user?.email);
+  const filledInvitees = invitees.filter((i) => i.email.trim());
   const totalSteps = 6;
   const showReviewSidebar = step === 4 || step === 5;
-  // Level 1 (receive-only) and Level 4 (Claim Party) can't initiate at all —
-  // the wizard body is shown for reference (blurred, non-interactive) below
-  // the upgrade banner, rather than staying fully usable behind a label.
-  const blocked = !capabilities.initiate;
+  // Level 1, Level 4 and Approvers can't start a Matrix — the wizard is shown
+  // for reference (blurred, non-interactive) under an explanation.
+  const blocked = !tierLoading && !capabilities.initiate;
 
   const matterTitle = useMemo(
     () => (accidentFacts ? `${accidentType} — ${accidentFacts.slice(0, 60)}` : claimNumber ? `Matter ${claimNumber}` : "Untitled matter"),
@@ -200,9 +198,14 @@ export default function NewSharedClaim() {
     if (!selectedClaimId && claimPackageOptions.length) setSelectedClaimId(claimPackageOptions[0].id);
   }, [claimPackageOptions, selectedClaimId]);
 
+  // Every document on the chosen claim starts ticked; only ticked ones are shared.
   useEffect(() => {
-    if (!recipientCompany && recipientCompanies.length) setRecipientCompany(recipientCompanies[0].id);
-  }, [recipientCompanies, recipientCompany]);
+    setSelectedDocs(selectedClaim?.documents ?? []);
+  }, [selectedClaim]);
+
+  function toggleDoc(name) {
+    setSelectedDocs((prev) => (prev.includes(name) ? prev.filter((d) => d !== name) : [...prev, name]));
+  }
 
   function toggleSceneCondition(condition) {
     setSceneConditions((prev) => (prev.includes(condition) ? prev.filter((c) => c !== condition) : [...prev, condition]));
@@ -217,26 +220,11 @@ export default function NewSharedClaim() {
     if (blocked) return;
     setSubmitting(true);
     try {
-      const recipientFields = {
-        recipientCompany: recipientDisplayName,
-        recipientAdjuster: recipientEmailForDisplay,
-        recipientType: recipientMode === "existing" ? "company" : newRecipientType,
-        recipientIsNew: recipientMode === "new",
-      };
+      const shared = { invitees: toInviteePayload(invitees), message };
       const payload = origin === "auto"
-        ? {
-            autoClaimId: selectedClaimId,
-            originApp: "auto",
-            title: selectedClaim?.title,
-            ...recipientFields,
-            invitedEmail,
-            permissionScope,
-            message,
-            includedDocuments: selectedClaim?.documents ?? [],
-          }
+        ? { autoClaimId: selectedClaim?.id, includedDocuments: selectedDocs, ...shared }
         : {
             autoClaimId: null,
-            originApp: originTierKey,
             title: matterTitle,
             claimNumber,
             insuredName,
@@ -256,32 +244,43 @@ export default function NewSharedClaim() {
             city,
             zip,
             sceneConditions,
-            ...recipientFields,
-            invitedEmail,
-            permissionScope,
-            message,
             includedDocuments: fileNames,
+            ...shared,
           };
       const res = await createClaimMatrix(payload);
-      setCreatedMatrixId(pickData(res)?.id ?? null);
+      const created = pickData(res);
+      setCreatedMatrixId(created?.id ?? null);
+      setInviteResults(created?.inviteResults ?? []);
       setStep(totalSteps);
-      toast.success("Matrix created");
+      toast.success("Matrix started and invitations sent");
     } catch (err) {
-      toast.error(err.message || "Failed to create matrix");
+      toast.error(err.message || "Could not start the Matrix");
     } finally {
       setSubmitting(false);
     }
   }
 
   function canContinue() {
-    if (blocked) return false;
+    if (blocked || tierLoading) return false;
+    if (step === 2 && origin === "auto") return !!selectedClaim;
     if (step === 2 && origin === "manual") return claimNumber.trim().length > 0 || insuredName.trim().length > 0;
-    if (step === 4) {
-      return recipientMode === "existing"
-        ? !!recipientCompany
-        : newRecipientName.trim().length > 0 && newRecipientEmail.trim().length > 0;
-    }
     return true;
+  }
+
+  // Leaving the invite step: finish any email lookups, then validate.
+  async function continueFromInvitees() {
+    setCheckingInvitees(true);
+    const resolved = await resolveLookups(invitees);
+    setInvitees(resolved);
+    setCheckingInvitees(false);
+    setShowInviteErrors(true);
+    if (Object.keys(validateInvitees(resolved, user?.email)).length === 0) setStep(5);
+  }
+
+  function handleNext() {
+    if (step >= 5) handleCreate();
+    else if (step === 4) continueFromInvitees();
+    else setStep((current) => Math.min(totalSteps, current + 1));
   }
 
   return (
@@ -298,23 +297,34 @@ export default function NewSharedClaim() {
 
       {blocked && (
         <Card className="mb-5 border-warning/60 bg-warning/10">
-          <CardContent className="flex flex-wrap items-center gap-3 p-4">
-            <MessageSquareWarning className="h-5 w-5 shrink-0 text-warning-foreground" />
-            <div className="flex-1 text-sm">
+          <CardContent className="flex flex-wrap items-center gap-3 p-4" role="alert">
+            <MessageSquareWarning className="h-5 w-5 shrink-0 text-warning-foreground" aria-hidden="true" />
+            <div className="min-w-0 flex-1 text-sm">
               <div className="font-semibold text-warning-foreground">
-                {tierKey === "level4" ? "Claim Party accounts can't initiate a matrix" : "Upgrade required to initiate a matrix"}
+                {capabilities.requestUpgrade
+                  ? "Upgrade required to start a Matrix"
+                  : tierKey === "approver"
+                    ? "Approver accounts are read-only"
+                    : "This account can't start a Matrix"}
               </div>
               <div className="mt-0.5 text-muted-foreground">
-                {tierKey === "level4"
-                  ? "This account receives matrices only. The steps below are shown for reference and can't be completed."
-                  : "Your account receives matrices only — upgrade to a CTK Compliance or CTK Auto account to initiate. The steps below are shown for reference and can't be completed."}
+                {capabilities.requestUpgrade
+                  ? "Level 1 accounts work on claims they're invited to. Ask for an upgrade and an Admin will choose Level 2 or Level 3 for you."
+                  : "You can view the claims shared with you. The steps below are shown for reference only."}
               </div>
             </div>
+            {capabilities.requestUpgrade && (
+              <Button asChild size="sm" variant="success">
+                <Link to="/upgrade">
+                  <ArrowUpCircle className="h-4 w-4" /> Request upgrade
+                </Link>
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
 
-      <div className={blocked ? "pointer-events-none select-none opacity-50 blur-[1.5px]" : undefined}>
+      <div className={blocked ? "pointer-events-none select-none opacity-50 blur-[1.5px]" : undefined} aria-hidden={blocked || undefined}>
       <div className="mb-6">
         <Stepper steps={STEP_LABELS} current={step} />
       </div>
@@ -323,11 +333,11 @@ export default function NewSharedClaim() {
         <Card className="mb-5 border-accent/70 bg-card shadow-card">
           <CardContent className="p-4">
             <div className="grid grid-cols-1 gap-3 text-sm lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-center">
-              <HandoffStep title="1. Starting point" body={showOriginPicker ? (canChooseOrigin ? "Choose below — pull from an existing Claim Toolkit Auto claim, or enter the matter directly." : "Manual entry only on this account — Claim Toolkit Auto is available on a CTK Auto account.") : "Determined by your access level."} />
+              <HandoffStep title="1. Starting point" body={canChooseOrigin ? "Choose below — one of your claims already copied from Claim Toolkit Auto, or enter the matter by hand." : "Manual entry on this account — Auto claims are available to Level 3 (Auto) accounts."} />
               <div className="hidden text-accent lg:block">{"->"}</div>
-              <HandoffStep title="2. Add details" body="Auto brings assessment, liability, and evidence automatically. Manual entry captures accident facts and location, and lets you upload documents directly." />
+              <HandoffStep title="2. Add details" body="Auto claims arrive with their whole Assessment already copied in — you choose which documents to share. Manual entry captures the facts and documents by hand." />
               <div className="hidden text-accent lg:block">{"->"}</div>
-              <HandoffStep title="3. Begin collaboration" body="Claim Matrix creates the shared space, invites recipients, triggers notifications, and logs audit — identical from here on." />
+              <HandoffStep title="3. Invite people" body="Invite anyone by email. Each person only sees the claims they're invited to, and every step is recorded in the Audit Trail." />
             </div>
           </CardContent>
         </Card>
@@ -351,7 +361,7 @@ export default function NewSharedClaim() {
             {step === 1 && showOriginPicker && (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {[
-                  { key: "auto", icon: Workflow, title: "Claim Toolkit Auto", body: "Pull an existing Auto claim — assessment, liability data, and documents come across automatically.", locked: autoOptionLocked },
+                  { key: "auto", icon: Workflow, title: "Select claim from Auto", body: "Pick one of your claims whose Assessment is complete — it's already copied into Matrix with all its data.", locked: autoOptionLocked },
                   { key: "manual", icon: PenLine, title: "Manual entry", body: "Enter accident facts and location by hand, upload documents directly, and open straight into negotiation.", locked: false },
                 ].map((opt) => {
                   const Icon = opt.icon;
@@ -384,7 +394,7 @@ export default function NewSharedClaim() {
                       {opt.locked && (
                         <div className="absolute inset-0 flex items-center justify-center bg-background/40">
                           <span className="inline-flex items-center gap-1.5 rounded-md border border-warning/60 bg-warning/15 px-2.5 py-1 text-xs font-semibold text-warning-foreground shadow-sm">
-                            <Lock className="h-3 w-3" /> Upgrade to CTK Auto for this option
+                            <Lock className="h-3 w-3" aria-hidden="true" /> Level 3 (Auto) accounts only
                           </span>
                         </div>
                       )}
@@ -394,20 +404,20 @@ export default function NewSharedClaim() {
               </div>
             )}
 
-            {step === 1 && !showOriginPicker && (
-              <div className="flex cursor-default items-start gap-3 rounded-md border border-accent bg-accent/5 p-4">
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-accent" />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 font-semibold">
-                    {origin === "auto" ? <Workflow className="h-4 w-4 text-accent" /> : <PenLine className="h-4 w-4 text-accent" />} {originCopy.title}
-                  </div>
-                  <div className="mt-1 text-sm text-muted-foreground">{originCopy.body}</div>
-                </div>
-              </div>
-            )}
-
             {step === 2 && origin === "auto" && (
-              packagesLoading ? <Spinner /> : (
+              packagesLoading ? <Spinner /> : claimPackageOptions.length === 0 ? (
+                <EmptyState
+                  title="No claims ready for Matrix"
+                  body="Claims appear here automatically once their Assessment is completed in Claim Toolkit Auto. You can also go back and use manual entry."
+                  action={
+                    user?.source === "Claim Toolkit" ? (
+                      <Button asChild variant="outline" size="sm">
+                        <Link to="/product/auto">Open the Auto app</Link>
+                      </Button>
+                    ) : null
+                  }
+                />
+              ) : (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-3 items-end">
                     <Field label="Claim number">
@@ -421,8 +431,8 @@ export default function NewSharedClaim() {
                     </Field>
                     <Button type="button" variant="success" onClick={() => setFindSearched(true)}>Search</Button>
                   </div>
-                  <div className="text-xs text-muted-foreground">Only Top 300 Records Displayed (Green Claims Have Been Entered)</div>
-                  <div className="rounded-lg border bg-background overflow-hidden">
+                  <div className="text-xs text-muted-foreground">Your claims whose Assessment is complete and that haven't been shared yet. One Matrix per claim.</div>
+                  <div className="rounded-lg border bg-background overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -577,30 +587,36 @@ export default function NewSharedClaim() {
             )}
 
             {step === 3 && origin === "auto" && (
-              <div className="rounded-lg border bg-background">
-                <div className="border-b px-4 py-3 text-sm font-medium">Select documents / assessment data / liability data</div>
-                <div className="divide-y">
-                  {(selectedClaim?.documents ?? []).map((document, index) => (
-                    <label key={document} className="flex items-center gap-3 px-4 py-3 text-sm">
-                      <Checkbox defaultChecked={index < 2} />
-                      <FileText className="h-4 w-4 text-primary" />
-                      <span className="flex-1">{document}</span>
-                      <StatusBadge variant={index < 2 ? "success" : "muted"}>{index < 2 ? "Selected" : "Optional"}</StatusBadge>
-                    </label>
-                  ))}
-                  {[
-                    "Structured liability assessment",
-                    "Suggested liability split",
-                    "Evidence references",
-                    "Claim metadata summary",
-                  ].map((item) => (
-                    <label key={item} className="flex items-center gap-3 px-4 py-3 text-sm">
-                      <Checkbox defaultChecked />
-                      <ShieldCheck className="h-4 w-4 text-accent" />
-                      <span className="flex-1">{item}</span>
-                      <StatusBadge variant="success">Required</StatusBadge>
-                    </label>
-                  ))}
+              <div className="space-y-4">
+                <div className="rounded-lg border bg-background">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+                    <div className="text-sm font-medium">Documents to share</div>
+                    <div className="text-xs text-muted-foreground">
+                      {selectedDocs.length} of {selectedClaim?.documents?.length ?? 0} selected
+                    </div>
+                  </div>
+                  {(selectedClaim?.documents ?? []).length === 0 ? (
+                    <div className="px-4 py-6 text-center text-sm text-muted-foreground">This claim has no documents.</div>
+                  ) : (
+                    <div className="divide-y">
+                      {selectedClaim.documents.map((document) => {
+                        const checked = selectedDocs.includes(document);
+                        return (
+                          <label key={document} className="flex cursor-pointer items-center gap-3 px-4 py-3 text-sm">
+                            <Checkbox checked={checked} onCheckedChange={() => toggleDoc(document)} />
+                            <FileText className="h-4 w-4 text-primary" aria-hidden="true" />
+                            <span className="flex-1 break-all">{document}</span>
+                            <StatusBadge variant={checked ? "success" : "muted"}>{checked ? "Will be shared" : "Not shared"}</StatusBadge>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-md border border-accent/40 bg-accent/5 p-3 text-xs text-muted-foreground">
+                  <ShieldCheck className="mr-1 inline h-3.5 w-3.5 text-accent" aria-hidden="true" />
+                  The rest of the claim — parties, vehicles, statements, the scene and the Assessment — was already copied into
+                  Matrix when the Assessment was completed. Only the documents above are optional.
                 </div>
               </div>
             )}
@@ -629,91 +645,14 @@ export default function NewSharedClaim() {
 
             {step === 4 && (
               <div className="space-y-5">
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRecipientMode("existing")}
-                    className={`flex-1 rounded-md border px-3 py-2 text-left text-sm transition ${recipientMode === "existing" ? "border-accent bg-accent/5 font-medium" : "border-border hover:border-accent/50"}`}
-                  >
-                    Existing company
-                    <div className="mt-0.5 text-xs font-normal text-muted-foreground">Already onboarded to Claim Matrix</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRecipientMode("new")}
-                    className={`flex-1 rounded-md border px-3 py-2 text-left text-sm transition ${recipientMode === "new" ? "border-accent bg-accent/5 font-medium" : "border-border hover:border-accent/50"}`}
-                  >
-                    New company or individual
-                    <div className="mt-0.5 text-xs font-normal text-muted-foreground">Not in the list yet — company or a direct claim party</div>
-                  </button>
-                </div>
-
-                {recipientMode === "existing" ? (
-                  <div className="grid grid-cols-2 gap-4">
-                    <Field label="Recipient company">
-                      {recipientCompanies.length === 0 ? (
-                        <div className="rounded-md border border-warning/50 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
-                          No companies found. Use "New company or individual" instead.
-                        </div>
-                      ) : (
-                        <Select value={recipientCompany} onValueChange={setRecipientCompany}>
-                          <SelectTrigger><SelectValue placeholder="Select a company" /></SelectTrigger>
-                          <SelectContent>
-                            {recipientCompanies.map((company) => (
-                              <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </Field>
-                    <Field label="Recipient adjuster">
-                      <Input value={recipientAdjuster} onChange={(e) => setRecipientAdjuster(e.target.value)} />
-                    </Field>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-4">
-                      <Field label="Recipient type">
-                        <Select value={newRecipientType} onValueChange={setNewRecipientType}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="company">Company (not yet in Matrix)</SelectItem>
-                            <SelectItem value="individual">Individual claim party</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label={newRecipientType === "individual" ? "Individual's name" : "Company name"}>
-                        <Input value={newRecipientName} onChange={(e) => setNewRecipientName(e.target.value)} placeholder={newRecipientType === "individual" ? "e.g. Dana Whitfield" : "e.g. Meridian Claims Group"} />
-                      </Field>
-                    </div>
-                    <Field label="Contact email">
-                      <Input type="email" value={newRecipientEmail} onChange={(e) => setNewRecipientEmail(e.target.value)} placeholder="name@example.com" />
-                    </Field>
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {newRecipientType === "individual"
-                        ? "Added directly as a Claim Party (Level 4) — receive-only access to this matrix: see authorized evidence, upload evidence, and respond to offers. No chat, no company-wide access."
-                        : "Not yet onboarded to Claim Matrix — this company is routed to the holding queue and notified by email until they accept and complete setup."}
-                    </p>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label="Invite another party by email">
-                    <Input value={invitedEmail} onChange={(e) => setInvitedEmail(e.target.value)} />
-                  </Field>
-                  <Field label="Permission scope">
-                    <Select value={permissionScope} onValueChange={setPermissionScope}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="view">View only</SelectItem>
-                        <SelectItem value="comment-evidence">Comment and evidence</SelectItem>
-                        <SelectItem value="settlement">Comment, evidence, settlement</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
-                <Field label="Message to recipient">
-                  <Textarea rows={4} value={message} onChange={(e) => setMessage(e.target.value)} />
+                <InviteesField
+                  value={invitees}
+                  onChange={setInvitees}
+                  errors={inviteErrors}
+                  showErrors={showInviteErrors}
+                />
+                <Field label="Message in the invitation email">
+                  <Textarea rows={3} value={message} onChange={(e) => setMessage(e.target.value)} maxLength={500} />
                 </Field>
               </div>
             )}
@@ -721,28 +660,21 @@ export default function NewSharedClaim() {
             {step === 5 && origin === "auto" && (
               <div className="space-y-5">
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <PackageFact icon={ArrowRightLeft} label="Handoff event" value="auto.package.shared" />
-                  <PackageFact icon={Building2} label="Source company" value="Northbridge Insurance" />
-                  <PackageFact icon={FileText} label="Included files" value={`${selectedClaim?.documents?.length ?? 0} documents`} />
-                  <PackageFact icon={CheckCircle2} label="Metadata snapshot" value={selectedClaim?.assessment ?? "—"} />
+                  <PackageFact icon={ArrowRightLeft} label="Claim" value={selectedClaim?.id ?? "—"} />
+                  <PackageFact icon={Building2} label="Your company" value={user?.company ?? "—"} />
+                  <PackageFact icon={FileText} label="Documents shared" value={`${selectedDocs.length} of ${selectedClaim?.documents?.length ?? 0}`} />
+                  <PackageFact icon={CheckCircle2} label="Assessment" value="Complete" />
                 </div>
-                <div className="rounded-md border bg-background p-4">
-                  <div className="font-medium">Notifications to trigger</div>
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                    <NotificationPreview icon={Mail} label="Email recipient" value={recipientAdjuster} />
-                    <NotificationPreview icon={UserPlus} label="Invite external party" value={invitedEmail} />
-                    <NotificationPreview icon={ShieldCheck} label="Audit event" value="Shared matrix created" />
-                  </div>
-                </div>
+                <InviteeSummary invitees={filledInvitees} />
               </div>
             )}
 
             {step === 5 && origin === "manual" && (
               <div className="space-y-5">
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                  <PackageFact icon={Building2} label="Origin" value={`Manual entry (${originTierKey})`} />
+                  <PackageFact icon={Building2} label="Origin" value="Manual entry" />
                   <PackageFact icon={FileText} label="Uploaded files" value={`${fileNames.length} documents`} />
-                  <PackageFact icon={ShieldCheck} label="Entry stage" value="Negotiation (no assessment)" />
+                  <PackageFact icon={ShieldCheck} label="Starts at" value="Negotiation" />
                   <PackageFact icon={CheckCircle2} label="Accident type" value={accidentType} />
                 </div>
                 <div className="rounded-md border bg-background p-4">
@@ -754,31 +686,49 @@ export default function NewSharedClaim() {
                   <DetailRow label="Vehicles / parties / witnesses" value={`${numVehicles} / ${numParties} / ${numWitnesses}`} />
                   <DetailRow label="Scene conditions" value={sceneConditions.length ? sceneConditions.join(", ") : "None noted"} />
                 </div>
-                <div className="rounded-md border bg-background p-4">
-                  <div className="font-medium">Notifications to trigger</div>
-                  <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                    <NotificationPreview icon={Mail} label="Email recipient" value={recipientAdjuster} />
-                    <NotificationPreview icon={UserPlus} label="Invite external party" value={invitedEmail} />
-                    <NotificationPreview icon={ShieldCheck} label="Audit event" value="matrix.created (manual entry)" />
-                  </div>
-                </div>
+                <InviteeSummary invitees={filledInvitees} />
               </div>
             )}
 
             {step === 6 && (
-              <div className="rounded-md border border-accent/50 bg-accent/5 p-6 text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-accent text-accent-foreground">
-                  <CheckCircle2 className="h-7 w-7" />
+              <div className="space-y-5">
+                <div className="rounded-md border border-accent/50 bg-accent/5 p-6 text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md bg-accent text-accent-foreground">
+                    <CheckCircle2 className="h-7 w-7" aria-hidden="true" />
+                  </div>
+                  <h2 className="mt-4 text-xl font-semibold">Matrix started</h2>
+                  <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+                    {createdMatrixId} is now shared. Each person below was emailed{origin === "auto" ? "; the claim has left your “ready” list" : ""}.
+                  </p>
                 </div>
-                <h2 className="mt-4 text-xl font-semibold">Matrix created</h2>
-                <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
-                  {origin === "auto"
-                    ? "Claim Matrix created an extended copy/summary, invited recipients, triggered notifications, and opened the collaboration space."
-                    : "Claim Matrix opened a negotiation-stage matter, invited recipients, triggered notifications, and opened the collaboration space."}
-                </p>
-                <Button asChild className="mt-5" variant="success">
-                  <Link to={createdMatrixId ? `/claims/${createdMatrixId}` : "/claims"}>Begin Collaboration</Link>
-                </Button>
+                {inviteResults.length > 0 && (
+                  <div className="rounded-md border bg-background">
+                    <div className="border-b px-4 py-3 text-sm font-medium">Who was invited</div>
+                    <ul className="divide-y">
+                      {inviteResults.map((r) => (
+                        <li key={r.email} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                          <div className="min-w-0">
+                            <div className="font-medium">{r.name}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {r.email} · {LEVEL_LABEL[r.level] ?? r.level}
+                            </div>
+                          </div>
+                          <StatusBadge variant={INVITE_STATUS_VARIANT[r.status] ?? "info"}>{r.status}</StatusBadge>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button asChild variant="success">
+                    <Link to={createdMatrixId ? `/claims/${createdMatrixId}` : "/claims"}>Open the claim</Link>
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link to="/demo-inbox">
+                      <Mail className="h-4 w-4" /> See the emails (demo inbox)
+                    </Link>
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -787,13 +737,18 @@ export default function NewSharedClaim() {
                 <Button type="button" variant="outline" disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}>
                   Back
                 </Button>
+                {step === 2 && !blocked && !canContinue() && (
+                  <p className="ml-auto mr-3 text-xs text-muted-foreground">
+                    {origin === "auto" ? "Select a claim to continue." : "Enter a claim number or the insured's name to continue."}
+                  </p>
+                )}
                 <Button
                   type="button"
                   variant="success"
-                  disabled={submitting || !canContinue()}
-                  onClick={() => (step >= 5 ? handleCreate() : setStep((current) => Math.min(totalSteps, current + 1)))}
+                  disabled={submitting || checkingInvitees || !canContinue()}
+                  onClick={handleNext}
                 >
-                  {step >= 5 ? (submitting ? "Sending…" : "Send Matrix") : "Continue"}
+                  {step >= 5 ? (submitting ? "Sending…" : "Send invitations") : checkingInvitees ? "Checking…" : "Continue"}
                 </Button>
               </div>
             )}
@@ -810,7 +765,7 @@ export default function NewSharedClaim() {
                 <>
                   <DetailRow label="Auto claim" value={selectedClaim?.id ?? "—"} />
                   <DetailRow label="Loss date" value={selectedClaim?.lossDate ?? "—"} />
-                  <DetailRow label="Assessment" value={selectedClaim?.assessment ?? "—"} />
+                  <DetailRow label="Assessment" value="Complete" />
                   <DetailRow label="Suggested liability" value={selectedClaim?.suggestedLiability ?? "—"} />
                 </>
               ) : (
@@ -818,21 +773,13 @@ export default function NewSharedClaim() {
                   <DetailRow label="Claim number" value={claimNumber || "—"} />
                   <DetailRow label="Insured name" value={insuredName || "—"} />
                   <DetailRow label="Accident type" value={accidentType} />
-                  <DetailRow label="Entry stage" value="Negotiation (no assessment)" />
+                  <DetailRow label="Starts at" value="Negotiation" />
                   <DetailRow label="Documents" value={`${fileNames.length} uploaded`} />
                 </>
               )}
-              <DetailRow
-                label="Recipient"
-                value={recipientDisplayName ? `${recipientDisplayName}${recipientMode === "new" ? ` (${newRecipientType === "individual" ? "new · claim party" : "new · holding queue"})` : ""}` : "—"}
-              />
-              <DetailRow label="Access" value="Comment and evidence" />
-              <DetailRow label="Wizard state" value={wizardTitle(step, origin)} />
-              {step === 5 && (
-                <div className="mt-5">
-                  <Button asChild variant="outline" className="w-full"><Link to="/claims"><Mail className="h-4 w-4" /> Save draft</Link></Button>
-                </div>
-              )}
+              <DetailRow label="People invited" value={String(filledInvitees.length)} />
+              {origin === "auto" && <DetailRow label="Documents shared" value={String(selectedDocs.length)} />}
+              <DetailRow label="Step" value={wizardTitle(step, origin)} />
             </CardContent>
           </Card>
         )}

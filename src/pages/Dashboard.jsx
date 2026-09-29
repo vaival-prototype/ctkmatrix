@@ -32,6 +32,7 @@ import { useClaims } from "@/hooks/useClaims";
 import { useAccessTier } from "@/hooks/useAccessTier";
 import { useDocuments } from "@/hooks/useDocuments";
 import accidentSceneImg from "@/assets/accident-scene.png";
+import { formatMoney, sourceLabel } from "@/utils/claimDisplay";
 
 const METRIC_ICONS = {
   "Open Claims": Handshake,
@@ -53,6 +54,7 @@ function resolveActivity(a) {
   const match = ACTIVITY_ICON_RULES.find(([re]) => re.test(a.action || ""));
   return { ...a, icon: match ? match[1] : MessageSquare, color: match ? match[2] : "text-muted-foreground" };
 }
+
 
 const STATUS_TONES = {
   "Pending review": "warning",
@@ -80,7 +82,9 @@ function adaptDashboardClaim(c) {
   return {
     ...c,
     subject: c.title,
-    statusLabel: humanizeStatus(c.status),
+    statusLabel: c.statusLabel ?? humanizeStatus(c.status),
+    source: sourceLabel(c),
+    exposureLabel: formatMoney(c.exposure, c.exposureCurrency) ?? "—",
     contact: {
       name: c.recipient ?? "Counterparty",
       org: c.recipient ?? "",
@@ -211,7 +215,7 @@ export default function Dashboard() {
             <Button variant="outline" size="sm" disabled title="Export isn't available yet">
               Export <StatusBadge variant="warning"><Sparkles className="h-3 w-3" /> Coming soon</StatusBadge>
             </Button>
-            <Button asChild size="sm"><Link to="/new-shared-claim"><ArrowRightLeft className="h-4 w-4" /> Initiate Matrix</Link></Button>
+            {capabilities.initiate && <Button asChild size="sm"><Link to="/new-shared-claim"><ArrowRightLeft className="h-4 w-4" /> Initiate Matrix</Link></Button>}
           </>
         }
       />
@@ -250,7 +254,7 @@ export default function Dashboard() {
                         <Link to={`/claims/${c.id}`} className="block h-full px-5 py-4">
                           <div className="text-xs font-mono text-muted-foreground">{c.id}</div>
                           <div className="font-medium text-foreground">{c.subject ?? c.title}</div>
-                          <div className="mt-0.5 text-[11px] text-muted-foreground">Source: Claim Toolkit Auto package</div>
+                          <div className="mt-0.5 text-[11px] text-muted-foreground">Source: {c.source}</div>
                         </Link>
                       </td>
                       <td>
@@ -265,12 +269,12 @@ export default function Dashboard() {
                       </td>
                       <td>
                         <Link to={`/claims/${c.id}`} className="block h-full px-5 py-4 font-medium">
-                          {c.exposure}
+                          {c.exposureLabel}
                         </Link>
                       </td>
                       <td>
                         <Link to={`/claims/${c.id}`} className="block h-full px-5 py-4">
-                          <StatusBadge variant={statusVariant(c.status)}>{c.statusLabel}</StatusBadge>
+                          <StatusBadge variant={c.status === "ready" ? "warning" : statusVariant(c.status)}>{c.statusLabel}</StatusBadge>
                         </Link>
                       </td>
                       <td>

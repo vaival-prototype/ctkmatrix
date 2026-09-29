@@ -2,17 +2,32 @@ import { useState, useEffect } from "react";
 import { getAuditEvents } from "@/services/auditService";
 import { pickList } from "@/services/api";
 
-export function useAuditEvents(matrixCode) {
+/**
+ * Audit events, newest first. Pass a matrix code to scope to one claim.
+ * `enabled: false` skips the request entirely (for users who can't see the
+ * Audit Trail). Page/limit are primitives so the effect doesn't re-run on
+ * every render.
+ */
+export function useAuditEvents(matrixCode, { page = 1, limit = 50, enabled = true } = {}) {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [meta, setMeta] = useState(null);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return undefined;
+    }
     const controller = new AbortController();
     setLoading(true);
-    getAuditEvents({ limit: 50, matrixCode })
+    setError(null);
+    getAuditEvents({ page, limit, matrixCode })
       .then((res) => {
-        if (!controller.signal.aborted) setData(pickList(res).items);
+        if (controller.signal.aborted) return;
+        const { items, meta: listMeta } = pickList(res);
+        setData(items);
+        setMeta(listMeta);
       })
       .catch((err) => {
         if (!controller.signal.aborted) setError(err);
@@ -21,7 +36,7 @@ export function useAuditEvents(matrixCode) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [matrixCode]);
+  }, [matrixCode, page, limit, enabled]);
 
-  return { data, loading, error };
+  return { data, meta, loading, error };
 }

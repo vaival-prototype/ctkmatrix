@@ -6,7 +6,7 @@ import ErrorBoundary from "@/components/shared/ErrorBoundary";
 import { useAuth } from "@/context/AuthContext";
 
 export default function AuthLayout() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, signedOut } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -18,7 +18,8 @@ export default function AuthLayout() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/signin" replace state={{ from: location.pathname }} />;
+    // After "Log out" don't remember the page — the next person to sign in may be someone else.
+    return <Navigate to="/signin" replace state={signedOut ? undefined : { from: location.pathname }} />;
   }
 
   return (

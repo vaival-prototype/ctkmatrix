@@ -27,6 +27,10 @@ import {
   Scale,
   FileClock,
   Route,
+  Flag,
+  Lock,
+  Info,
+  Car,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -49,11 +53,23 @@ import { useAuditEvents } from "@/hooks/useAuditEvents";
 import { useAuth } from "@/context/AuthContext";
 import { useAccessTier } from "@/hooks/useAccessTier";
 import ClaimContactRolodex from "@/components/chat/ClaimContactRolodex";
+import NoAccess from "@/components/shared/NoAccess";
+import InviteClaimDialog from "@/components/shared/InviteClaimDialog";
 import accidentSceneImg from "@/assets/accident-scene.png";
+import { formatMoney } from "@/utils/claimDisplay";
 
 const claimDetailTabs = ["overview", "participants", "analysis", "negotiation", "evidence", "documents", "audit"];
 
 const dash = (value) => (value === 0 ? 0 : value ?? "—");
+
+const MEMBER_STATUS_VARIANT = {
+  Active: "success",
+  Invited: "info",
+  "Awaiting approval": "warning",
+  "Awaiting password": "info",
+  Rejected: "danger",
+  Expired: "muted",
+};
 
 function SectionTitle({ children }) {
   return <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{children}</div>;
@@ -105,9 +121,7 @@ function ClaimSummaryBar({ claim }) {
         <span className="text-muted-foreground">
           Current Offer:{" "}
           <span className="font-medium text-foreground">
-            {claim.exposure != null
-              ? `${claim.exposureCurrency ?? "USD"} ${Number(claim.exposure).toLocaleString()}`
-              : ""}
+            {claim.exposure != null ? formatMoney(claim.exposure, claim.exposureCurrency ?? "USD") : ""}
             {claim.exposure != null && claim.liability ? " · " : ""}
             {claim.liability || ""}
           </span>
@@ -405,7 +419,7 @@ function HistoryTimeline({ events, loading, emptyBody }) {
   );
 }
 
-function CompanyAssessmentsCard({ claimId, assessments, participants, onSaved }) {
+function CompanyAssessmentsCard({ claimId, assessments, participants, onSaved, canEdit }) {
   const { user } = useAuth();
   const myCompany = user?.company ?? "";
   const hasSubmitted = assessments.some((a) => a.company === myCompany);
@@ -453,7 +467,7 @@ function CompanyAssessmentsCard({ claimId, assessments, participants, onSaved })
           </div>
         )}
 
-        {myCompany && !hasSubmitted && participants.length > 0 && (
+        {canEdit && myCompany && !hasSubmitted && participants.length > 0 && (
           <form onSubmit={handleSubmit} className="rounded-md border bg-background p-4 space-y-3">
             <div className="text-sm font-medium">Submit your assessment as {myCompany}</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -485,7 +499,7 @@ function CompanyAssessmentsCard({ claimId, assessments, participants, onSaved })
   );
 }
 
-function DutyAgreementCard({ claimId, duties, onSaved }) {
+function DutyAgreementCard({ claimId, duties, onSaved, canEdit }) {
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -533,9 +547,11 @@ function DutyAgreementCard({ claimId, duties, onSaved }) {
               </Button>
             </div>
           ) : (
-            <Button type="button" variant="outline" size="sm" onClick={startEditing}>
-              Edit
-            </Button>
+            canEdit && rows.length > 0 && (
+              <Button type="button" variant="outline" size="sm" onClick={startEditing}>
+                Edit
+              </Button>
+            )
           )}
         </div>
 
@@ -692,14 +708,14 @@ export default function ClaimDetail() {
   const reloadClaim = () => setClaimRefreshKey((k) => k + 1);
 
   const { data: claim, loading, error } = useClaimDetail(claimId, claimRefreshKey);
-  const { tierKey, capabilities } = useAccessTier();
-  // Level 4 (Claim Party) is strictly view-only in this build: no chat, no
-  // uploads, no settlement actions — see authorized evidence and status only.
-  const isReadOnly = tierKey === "level4";
+  const { tierKey, capabilities, isAdmin } = useAccessTier();
+  // Level 4 (a person in the claim) and Approvers can view but never change a claim.
+  const isReadOnly = !!capabilities.readOnly;
+  const canSeeHistory = !!capabilities.auditTrail;
   // claim.documents from the claims API is just a count (see APIrequire.md) — the actual
   // document objects live behind GET /documents, matched here by matrixId.
   const { data: allDocuments, loading: documentsLoading } = useDocuments(claimRefreshKey);
-  const { data: auditEvents, loading: auditLoading } = useAuditEvents(claimId);
+  const { data: auditEvents, loading: auditLoading } = useAuditEvents(claimId, { enabled: canSeeHistory });
   const { data: unclassifiedUploads, loading: unclassifiedLoading } = useUnclassifiedUploads(claimId, claimRefreshKey);
   const [pendingUpload, setPendingUpload] = useState(null);
   const [uploadingUnclassified, setUploadingUnclassified] = useState(false);
@@ -708,12 +724,12 @@ export default function ClaimDetail() {
 
   useEffect(() => {
     const requestedTab = new URLSearchParams(searchStr).get("tab");
-    if (requestedTab && claimDetailTabs.includes(requestedTab)) {
+    if (requestedTab && claimDetailTabs.includes(requestedTab) && (requestedTab !== "audit" || canSeeHistory)) {
       setActiveTab(requestedTab);
     } else if (pathname === `/claims/${claimId}`) {
       setActiveTab("overview");
     }
-  }, [claimId, pathname, searchStr]);
+  }, [claimId, pathname, searchStr, canSeeHistory]);
 
   function changeTab(nextTab) {
     setActiveTab(nextTab);
@@ -763,6 +779,15 @@ export default function ClaimDetail() {
 
   if (loading) return <Spinner />;
 
+  if (error?.status === 403) {
+    return (
+      <NoAccess
+        title="You don't have access to this claim"
+        body="Only the people invited to a claim can open it. Ask the person who shared it to invite you."
+      />
+    );
+  }
+
   if (error || !claim) {
     return (
       <div className="py-10">
@@ -784,6 +809,15 @@ export default function ClaimDetail() {
   const parties = Array.isArray(claim.parties) ? claim.parties : [];
   const matrixCode = claim.id || claimId;
   const documents = (allDocuments ?? []).filter((d) => d.matrixId === matrixCode);
+  const isReady = claim.status === "ready";
+  const isClosed = claim.status === "closed";
+  // In-claim actions only on a shared, open claim, and never for read-only accounts.
+  const live = !isReady && !isClosed && !isReadOnly;
+  const can = (capability) => live && !!capabilities[capability];
+  const canClose = can("closeClaim") && (isAdmin || claim.isInitiator);
+  const vehicles = Array.isArray(claim.vehicles) ? claim.vehicles : [];
+  const statements = Array.isArray(claim.statements) ? claim.statements : [];
+  const offers = Array.isArray(claim.offers) ? claim.offers : [];
   const pendingUploads = (unclassifiedUploads ?? []).filter((u) => u.matrixId === matrixCode);
 
   return (
@@ -796,18 +830,35 @@ export default function ClaimDetail() {
               <span>
                 Matrix Number: <span className="text-foreground font-semibold">{dash(claim.id || claimId)}</span>
               </span>
-              {claim.status && <StatusBadge variant="info">{claim.status}</StatusBadge>}
+              {claim.status && (
+                <StatusBadge variant={isReady ? "warning" : isClosed ? "muted" : "info"}>{claim.statusLabel ?? claim.status}</StatusBadge>
+              )}
             </div>
             <h1 className="text-lg font-semibold">{dash(claim.title)}</h1>
             <div className="flex flex-wrap items-center gap-2">
-              {!isReadOnly && (
+              {can("offers") && (
                 <Button asChild size="sm" variant="success">
                   <Link to={`/claims/${claimId}/settlement`}>
                     <Handshake className="h-4 w-4" /> Propose Settlement
                   </Link>
                 </Button>
               )}
-              {claim.autoClaimId && (
+              {can("invite") && <InviteClaimDialog claimId={matrixCode} claimTitle={claim.title} onInvited={reloadClaim} />}
+              {can("dispute") && (
+                <Button asChild size="sm" variant="outline">
+                  <Link to={`/claims/${claimId}/respond`}>
+                    <Flag className="h-4 w-4" /> File a formal dispute
+                  </Link>
+                </Button>
+              )}
+              {canClose && (
+                <Button asChild size="sm" variant="outline">
+                  <Link to={`/claims/${claimId}/close`}>
+                    <Lock className="h-4 w-4" /> Close claim
+                  </Link>
+                </Button>
+              )}
+              {claim.autoClaimId && !isReadOnly && (
                 tierKey === "level3" ? (
                   <Button asChild variant="outline" size="sm">
                     <a
@@ -840,9 +891,30 @@ export default function ClaimDetail() {
               </Button>
             </div>
           </div>
-          {capabilities.chat && <ClaimContactRolodex participants={participantDetails} claimId={matrixCode} />}
+          {capabilities.chat && !isReady && <ClaimContactRolodex participants={participantDetails} claimId={matrixCode} />}
         </div>
         <ClaimSummaryBar claim={claim} />
+        {isReady && (
+          <div className="flex items-start gap-2 rounded-md border border-warning/60 bg-warning/10 p-3 text-sm" role="status">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" aria-hidden="true" />
+            <span>
+              <span className="font-semibold">Ready — not shared yet.</span> A background job copied this claim in when its
+              Assessment was completed. Only you can see it. To share it, go to Initiate Matrix and select it from your Auto claims.
+            </span>
+          </div>
+        )}
+        {isClosed && (
+          <div className="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm" role="status">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span>This claim is closed. It stays available to view.</span>
+          </div>
+        )}
+        {isReadOnly && !isReady && (
+          <div className="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm" role="status">
+            <Eye className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span>You can view this claim. Your account can't make changes to it.</span>
+          </div>
+        )}
       </div>
 
       {/* Persists across all tabs — same real data/layout as the Dashboard's claim row */}
@@ -851,14 +923,14 @@ export default function ClaimDetail() {
       </div>
 
       <Tabs value={activeTab} onValueChange={changeTab}>
-        <TabsList className="bg-card border">
+        <TabsList className="bg-card border h-auto flex-wrap justify-start">
           <TabsTrigger value="overview">Investigation</TabsTrigger>
           <TabsTrigger value="participants">Participants</TabsTrigger>
           <TabsTrigger value="analysis">Assessment</TabsTrigger>
           <TabsTrigger value="negotiation">Negotiation</TabsTrigger>
           <TabsTrigger value="evidence">Evidence</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="audit">History</TabsTrigger>
+          {canSeeHistory && <TabsTrigger value="audit">History</TabsTrigger>}
         </TabsList>
 
         {/* Investigation / overview */}
@@ -869,11 +941,11 @@ export default function ClaimDetail() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <Fact label="Matrix ID" value={claim.id || claimId} />
                 <Fact label="Source claim" value={claim.autoClaimId} />
-                <Fact label="Status" value={claim.status} />
+                <Fact label="Status" value={claim.statusLabel ?? claim.status} />
                 <Fact label="Initiator" value={claim.initiator} />
                 <Fact label="Recipient" value={claim.recipient} />
                 <Fact label="Liability" value={claim.liability} />
-                <Fact label="Exposure" value={claim.exposure} />
+                <Fact label="Exposure" value={formatMoney(claim.exposure, claim.exposureCurrency ?? "USD")} />
                 <Fact label="Opened" value={claim.opened} />
                 <Fact label="Last updated" value={claim.updated} />
               </div>
@@ -970,52 +1042,94 @@ export default function ClaimDetail() {
 
             <AgreementStatusCard duties={claim.dutyAgreements ?? []} overallSummary={claim.overallSummary} />
           </div>
+
+          {(vehicles.length > 0 || statements.length > 0) && (
+            <Card className="shadow-card border-accent/60">
+              <CardContent className="p-6 space-y-4">
+                <SectionTitle>Copied from Claim Toolkit Auto</SectionTitle>
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                  <div>
+                    <div className="mb-2 text-xs text-muted-foreground">Vehicles</div>
+                    {vehicles.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No vehicles recorded.</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {vehicles.map((v) => (
+                          <li key={v.unit} className="flex gap-2 rounded-md border bg-background p-2.5 text-sm">
+                            <Car className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                            <span>
+                              <span className="font-medium">{v.unit}:</span> {v.description}
+                              {v.damage && <span className="block text-xs text-muted-foreground">Damage: {v.damage}</span>}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div>
+                    <div className="mb-2 text-xs text-muted-foreground">Statements</div>
+                    {statements.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No statements recorded.</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {statements.map((st, i) => (
+                          <li key={i} className="rounded-md border bg-background p-2.5 text-sm">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-medium">{st.by}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {st.type}
+                                {st.date ? ` · ${new Date(st.date).toLocaleDateString()}` : ""}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">{st.summary}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* Participants */}
         <TabsContent value="participants" className="mt-5 space-y-5">
           <Card className="shadow-card border-accent/60">
             <CardContent className="p-6 space-y-4">
-              <SectionTitle>Initiator &amp; Receivers</SectionTitle>
+              <SectionTitle>People in this claim</SectionTitle>
               {participantDetails.length === 0 ? (
-                <NotFound body="No participants are recorded for this matrix." />
+                <NotFound body={isReady ? "Nobody has been invited yet — this claim hasn't been shared." : "No participants are recorded for this matrix."} />
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                        <th className="pb-2 pr-4 font-medium">Participant</th>
+                        <th className="pb-2 pr-4 font-medium">Person</th>
+                        <th className="pb-2 pr-4 font-medium">Company</th>
                         <th className="pb-2 pr-4 font-medium">Role</th>
-                        <th className="pb-2 pr-4 font-medium">Receiver type</th>
-                        <th className="pb-2 pr-4 font-medium">Claim Ref</th>
-                        <th className="pb-2 pr-4 font-medium">Contact</th>
-                        <th className="pb-2 pr-4 font-medium">Received</th>
-                        <th className="pb-2 pr-4 font-medium">Last activity</th>
+                        <th className="pb-2 pr-4 font-medium">Access</th>
+                        <th className="pb-2 pr-4 font-medium">Invited</th>
                         <th className="pb-2 font-medium">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y">
                       {participantDetails.map((p, i) => (
-                        <tr key={`${p.company}-${i}`}>
-                          <td className="py-3 pr-4 font-medium">{p.company}</td>
+                        <tr key={`${p.contactEmail}-${i}`}>
+                          <td className="py-3 pr-4">
+                            <div className="font-medium">{p.name}</div>
+                            <div className="text-xs text-muted-foreground">{p.contactEmail}</div>
+                          </td>
+                          <td className="py-3 pr-4 text-muted-foreground">{p.company}</td>
                           <td className="py-3 pr-4 text-muted-foreground">{p.role}</td>
-                          <td className="py-3 pr-4 text-muted-foreground">{p.contactRole || "—"}</td>
-                          <td className="py-3 pr-4 text-muted-foreground">{dash(claim.claimNumber || claim.id || claimId)}</td>
-                          <td className="py-3 pr-4 text-muted-foreground">{p.contactEmail || "—"}</td>
+                          <td className="py-3 pr-4 text-muted-foreground">{p.contactRole}</td>
                           <td className="py-3 pr-4 text-muted-foreground">
                             {p.joined ? new Date(p.joined).toLocaleDateString() : "—"}
                           </td>
-                          <td className="py-3 pr-4 text-muted-foreground">
-                            {p.lastActivity ? new Date(p.lastActivity).toLocaleDateString() : "—"}
-                          </td>
                           <td className="py-3">
-                            {p.invitationStatus ? (
-                              <StatusBadge variant={p.invitationStatus === "Accepted" ? "success" : "info"}>
-                                {p.invitationStatus}
-                              </StatusBadge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
+                            <StatusBadge variant={MEMBER_STATUS_VARIANT[p.invitationStatus] ?? "info"}>
+                              {p.invitationStatus}
+                            </StatusBadge>
                           </td>
                         </tr>
                       ))}
@@ -1090,24 +1204,46 @@ export default function ClaimDetail() {
             assessments={claim.companyAssessments ?? []}
             participants={participants}
             onSaved={reloadClaim}
+            canEdit={can("assessment")}
           />
-          <DutyAgreementCard claimId={claimId} duties={claim.dutyAgreements ?? []} onSaved={reloadClaim} />
+          <DutyAgreementCard claimId={claimId} duties={claim.dutyAgreements ?? []} onSaved={reloadClaim} canEdit={can("assessment")} />
           <AgreementStatusCard duties={claim.dutyAgreements ?? []} overallSummary={claim.overallSummary} />
         </TabsContent>
 
         {/* Negotiation (settlement actions + rep decision) */}
         <TabsContent value="negotiation" className="mt-5 space-y-5">
-          {isReadOnly && (
-            <Card className="border-accent/40 bg-muted/30">
-              <CardContent className="p-4 text-xs text-muted-foreground">
-                Claim Party accounts can view offer status here but can't propose, accept, or counter.
+          {offers.length > 0 && (
+            <Card className="shadow-card border-accent/50">
+              <CardContent className="p-6 space-y-3">
+                <SectionTitle>Offer history</SectionTitle>
+                <ul className="divide-y rounded-md border bg-background">
+                  {[...offers].reverse().map((o, i) => (
+                    <li key={i} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+                      <span>
+                        <span className="font-medium capitalize">{o.action}</span> by {o.by}
+                        {o.amount ? ` · ${formatMoney(o.amount)}` : ""}
+                        {o.split ? ` · ${o.split}` : ""}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{new Date(o.at).toLocaleString()}</span>
+                    </li>
+                  ))}
+                </ul>
               </CardContent>
             </Card>
           )}
-          <div className={isReadOnly ? "pointer-events-none opacity-60 space-y-5" : "space-y-5"}>
-            <SettlementActions claimId={claimId} claim={claim} />
-            <ClaimRepDecisionPanel claimId={claimId} />
-          </div>
+          {!can("offers") && !can("agreeSplit") && (
+            <Card className="border-accent/40 bg-muted/30">
+              <CardContent className="p-4 text-xs text-muted-foreground">
+                {isReady
+                  ? "Offers start once this claim is shared."
+                  : isClosed
+                    ? "This claim is closed — offers are final."
+                    : "Your account can see where the negotiation stands but can't make or reply to offers."}
+              </CardContent>
+            </Card>
+          )}
+          {can("offers") && <SettlementActions claimId={claimId} claim={claim} onSaved={reloadClaim} />}
+          {can("agreeSplit") && <ClaimRepDecisionPanel claimId={claimId} onSaved={reloadClaim} />}
         </TabsContent>
 
         {/* Evidence */}
@@ -1116,7 +1252,7 @@ export default function ClaimDetail() {
             <CardContent className="p-6 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <SectionTitle>Evidence</SectionTitle>
-                {!isReadOnly && (
+                {can("uploadEvidence") && (
                   <Button asChild variant="success" size="sm">
                     <Link to={`/documents/upload?matrixId=${encodeURIComponent(matrixCode)}`}>
                       <Upload className="h-4 w-4" /> Upload document
@@ -1129,7 +1265,7 @@ export default function ClaimDetail() {
             </CardContent>
           </Card>
 
-          <VersionHistoryCard events={auditEvents} loading={auditLoading} />
+          {canSeeHistory && <VersionHistoryCard events={auditEvents} loading={auditLoading} />}
         </TabsContent>
 
         {/* Documents */}
@@ -1138,7 +1274,7 @@ export default function ClaimDetail() {
             <CardContent className="p-6 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <SectionTitle>Documents &amp; Metadata</SectionTitle>
-                {!isReadOnly && (
+                {can("uploadEvidence") && (
                   <Button asChild variant="success" size="sm">
                     <Link to={`/documents/upload?matrixId=${encodeURIComponent(matrixCode)}`}>
                       <Upload className="h-4 w-4" /> Upload
@@ -1157,7 +1293,7 @@ export default function ClaimDetail() {
             <CardContent className="p-6 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <SectionTitle>Unclassified Uploads</SectionTitle>
-                {!isReadOnly && (
+                {can("uploadEvidence") && (
                   <div className="flex items-center gap-2">
                     <Input
                       type="file"
@@ -1194,13 +1330,13 @@ export default function ClaimDetail() {
                           Uploaded by {u.uploadedBy} &middot; {u.uploadedAt}
                         </p>
                       </div>
-                      {!isReadOnly && (
+                      {can("uploadEvidence") && (
                         <div className="flex items-center gap-2">
                           <Select
                             value={promoteTypes[u.id] || "evidence"}
                             onValueChange={(val) => setPromoteTypes((prev) => ({ ...prev, [u.id]: val }))}
                           >
-                            <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-9 w-44" aria-label="Classify as"><SelectValue /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="evidence">Evidence</SelectItem>
                               <SelectItem value="assessment">Assessment</SelectItem>
@@ -1236,7 +1372,8 @@ export default function ClaimDetail() {
           </Card>
         </TabsContent>
 
-        {/* History */}
+        {/* History (Admin and Approver only) */}
+        {canSeeHistory && (
         <TabsContent value="audit" className="mt-5">
           <Card className="shadow-card border-accent/60">
             <CardContent className="p-6 space-y-3">
@@ -1252,12 +1389,13 @@ export default function ClaimDetail() {
             </CardContent>
           </Card>
         </TabsContent>
+        )}
       </Tabs>
     </>
   );
 }
 
-function SettlementActions({ claimId }) {
+function SettlementActions({ claimId, onSaved }) {
   const [submitting, setSubmitting] = useState(false);
   const [settlementEvent, setSettlementEvent] = useState(null);
 
@@ -1282,6 +1420,7 @@ function SettlementActions({ claimId }) {
       });
       setSettlementEvent("counter");
       toast.success("Counter-offer sent");
+      onSaved?.();
     } catch (err) {
       toast.error(err.message || "Failed to send counter-offer");
     } finally {
@@ -1299,6 +1438,7 @@ function SettlementActions({ claimId }) {
       });
       setSettlementEvent("accepted");
       toast.success("Settlement accepted");
+      onSaved?.();
     } catch (err) {
       toast.error(err.message || "Failed to accept settlement");
     } finally {
@@ -1385,7 +1525,7 @@ function SettlementActions({ claimId }) {
   );
 }
 
-function ClaimRepDecisionPanel({ claimId }) {
+function ClaimRepDecisionPanel({ claimId, onSaved }) {
   const [stance, setStance] = useState(null);
   const [notes, setNotes] = useState("");
   const [saved, setSaved] = useState(false);
@@ -1398,6 +1538,7 @@ function ClaimRepDecisionPanel({ claimId }) {
       await submitClaimDecision(claimId, { decision: stance, notes });
       setSaved(true);
       toast.success("Decision saved");
+      onSaved?.();
     } catch (err) {
       toast.error(err.message || "Failed to save decision");
     } finally {

@@ -22,7 +22,8 @@ const RAIL_ITEMS = [
   { key: "matrix", label: "Claim Matrix", icon: ClipboardCheck, to: "/dashboard", accent: true },
 ];
 
-export function ProductHeader({ logoLabel, logoSubLabel, navItems, clientName = "United", incidentLabel = "Incident Management" }) {
+export function ProductHeader({ logoLabel, logoSubLabel, navItems, clientName = "United", incidentLabel = "Incident Management", userName = "" }) {
+  const initials = userName.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("") || "?";
   return (
     <header className="flex h-16 items-center justify-between bg-[#1b2540] px-6 text-white">
       <div className="flex items-center gap-8">
@@ -44,7 +45,7 @@ export function ProductHeader({ logoLabel, logoSubLabel, navItems, clientName = 
         <button type="button" className="rounded-sm bg-[#2c7a44] px-3 py-1.5 text-xs font-semibold hover:bg-[#256238]">
           {incidentLabel}
         </button>
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">I</div>
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-xs font-semibold" title={userName} aria-label={userName ? `Signed in as ${userName}` : undefined}>{initials}</div>
       </div>
     </header>
   );
