@@ -62,9 +62,9 @@ function adaptClaim(c) {
   };
 }
 
-function MatrixCell({ claimId, className, children }) {
+function MatrixCell({ claimId, className, title, children }) {
   return (
-    <Link to={`/claims/${claimId}`} className={`block h-full ${className ?? ""}`}>
+    <Link to={`/claims/${claimId}`} className={`block h-full ${className ?? ""}`} title={title}>
       {children}
     </Link>
   );
@@ -288,22 +288,24 @@ export default function Claims() {
                     <td>
                       <MatrixCell claimId={c.id} className="px-5 py-4">
                         <div className="text-xs font-mono text-muted-foreground">{c.id}</div>
-                        <div className="font-medium text-foreground">{c.subject}</div>
-                        <div className="mt-0.5 text-[11px] text-muted-foreground">Source: {c.source}</div>
+                        <div className="max-w-[16rem] truncate font-medium text-foreground" title={c.subject}>
+                          {c.subject}
+                        </div>
+                        <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">Source: {c.source}</div>
                       </MatrixCell>
                     </td>
                     <td>
-                      <MatrixCell claimId={c.id} className="px-5 py-4 text-muted-foreground">
+                      <MatrixCell claimId={c.id} className="max-w-[20rem] truncate px-5 py-4 text-muted-foreground" title={c.parties.join(" ↔ ")}>
                         {c.parties.join(" ↔ ")}
                       </MatrixCell>
                     </td>
                     <td>
-                      <MatrixCell claimId={c.id} className="px-5 py-4 font-medium">
+                      <MatrixCell claimId={c.id} className="whitespace-nowrap px-5 py-4 font-medium">
                         {c.liability}
                       </MatrixCell>
                     </td>
                     <td>
-                      <MatrixCell claimId={c.id} className="px-5 py-4 font-medium">
+                      <MatrixCell claimId={c.id} className="whitespace-nowrap px-5 py-4 font-medium">
                         {c.value}
                       </MatrixCell>
                     </td>
@@ -315,7 +317,7 @@ export default function Claims() {
                       </MatrixCell>
                     </td>
                     <td>
-                      <MatrixCell claimId={c.id} className="px-5 py-4 text-muted-foreground">
+                      <MatrixCell claimId={c.id} className="whitespace-nowrap px-5 py-4 text-muted-foreground">
                         {c.updated}
                       </MatrixCell>
                     </td>

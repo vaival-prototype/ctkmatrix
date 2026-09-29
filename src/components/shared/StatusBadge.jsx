@@ -22,11 +22,11 @@ export default function StatusBadge({ variant = "default", children }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium",
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium",
         variantMap[variant]
       )}
     >
-      <span className={cn("h-1.5 w-1.5 rounded-full", dotMap[variant])} />
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotMap[variant])} />
       {children}
     </span>
   );

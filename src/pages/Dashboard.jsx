@@ -233,6 +233,7 @@ export default function Dashboard() {
               <EmptyState title="Data not found" body="No open claims are available from the server yet." />
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/60 text-muted-foreground text-xs uppercase tracking-wider">
                 <tr>
@@ -253,22 +254,28 @@ export default function Dashboard() {
                       <td>
                         <Link to={`/claims/${c.id}`} className="block h-full px-5 py-4">
                           <div className="text-xs font-mono text-muted-foreground">{c.id}</div>
-                          <div className="font-medium text-foreground">{c.subject ?? c.title}</div>
-                          <div className="mt-0.5 text-[11px] text-muted-foreground">Source: {c.source}</div>
+                          <div className="max-w-[16rem] truncate font-medium text-foreground" title={c.subject ?? c.title}>
+                            {c.subject ?? c.title}
+                          </div>
+                          <div className="mt-0.5 whitespace-nowrap text-[11px] text-muted-foreground">Source: {c.source}</div>
                         </Link>
                       </td>
                       <td>
-                        <Link to={`/claims/${c.id}`} className="block h-full px-5 py-4 text-muted-foreground">
+                        <Link
+                          to={`/claims/${c.id}`}
+                          className="block h-full max-w-[20rem] truncate px-5 py-4 text-muted-foreground"
+                          title={partyNames.join(" ↔ ")}
+                        >
                           {partyNames.join(" ↔ ")}
                         </Link>
                       </td>
                       <td>
-                        <Link to={`/claims/${c.id}`} className="block h-full px-5 py-4 font-medium">
+                        <Link to={`/claims/${c.id}`} className="block h-full whitespace-nowrap px-5 py-4 font-medium">
                           {c.liability}
                         </Link>
                       </td>
                       <td>
-                        <Link to={`/claims/${c.id}`} className="block h-full px-5 py-4 font-medium">
+                        <Link to={`/claims/${c.id}`} className="block h-full whitespace-nowrap px-5 py-4 font-medium">
                           {c.exposureLabel}
                         </Link>
                       </td>
@@ -278,7 +285,7 @@ export default function Dashboard() {
                         </Link>
                       </td>
                       <td>
-                        <Link to={`/claims/${c.id}`} className="block h-full px-5 py-4 text-muted-foreground">
+                        <Link to={`/claims/${c.id}`} className="block h-full whitespace-nowrap px-5 py-4 text-muted-foreground">
                           {c.updated}
                         </Link>
                       </td>
@@ -297,6 +304,7 @@ export default function Dashboard() {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </CardContent>
       </Card>
